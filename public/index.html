@@ -1,402 +1,294 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="id">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sajak Kode - System Override</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>System Override</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap"
-      rel="stylesheet"
-    />
-
-    <link rel="icon" type="image/png" href="/images/favicon.png" />
-
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
     <style>
-      body {
-        font-family: "JetBrains Mono", monospace;
-        background-color: #0d1117;
-        color: #3fb950;
-      }
-      .glitch {
-        animation: glitch 1s infinite;
-      }
-      @keyframes glitch {
-        0% {
-          opacity: 1;
-        }
-        50% {
-          opacity: 0.8;
-        }
-        100% {
-          opacity: 1;
-        }
-      }
-      #map {
-        height: 400px;
-        width: 100%;
-        border: 2px solid #3fb950;
-      }
-    </style>
-  </head>
-  <body class="flex flex-col items-center justify-center min-h-screen p-4 overflow-hidden">
-
-    <div class="w-full max-w-md space-y-6 relative">
+        body { font-family: 'JetBrains Mono', monospace; background-color: #0d1117; color: #3fb950; overflow-x: hidden; }
+        .glitch { animation: glitch 1s infinite; }
+        @keyframes glitch { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
+        #map { height: 50vh; width: 100%; border: 2px solid #3fb950; border-radius: 8px; }
         
-        <div class="text-center z-10 relative">
-            <h1 class="text-2xl font-bold glitch pointer-events-none">> SYSTEM_LOCKED</h1>
-            <p class="text-xs text-gray-500 mt-1">SECURE CONNECTION</p>
-        </div>
+        /* Animasi Fade In */
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
 
-        <div id="countdown-panel" class="text-center space-y-4 p-6 border border-yellow-600 bg-yellow-900/10 rounded relative">
-            <h2 class="text-yellow-500 font-bold text-xl glitch">RESTRICTED AREA</h2>
-            <p class="text-xs text-gray-400">ACCESS OPENS IN:</p>
+    <div class="w-full max-w-md text-center mb-6 z-10">
+        <h1 class="text-2xl font-bold glitch pointer-events-none">> SAJAK_KODE_LDR</h1>
+        <p class="text-[10px] text-gray-500 mt-1 tracking-[0.3em]">SECURE CONNECTION ESTABLISHED</p>
+    </div>
+
+    <div class="w-full max-w-md relative">
+        
+        <div id="countdown-panel" class="text-center space-y-4 p-8 border border-yellow-600 bg-yellow-900/10 rounded-lg relative">
+            <div class="absolute top-2 right-2 w-2 h-2 bg-yellow-500 rounded-full animate-ping"></div>
+            <h2 class="text-yellow-500 font-bold text-lg">SYSTEM LOCKED</h2>
+            <p class="text-xs text-gray-400">ACCESS RESTRICTED UNTIL:</p>
             
-            <div class="text-4xl font-mono font-bold text-white tracking-widest my-4 relative" id="timer-wrapper">
-                <span id="timer-display">LOADING...</span>
+            <div class="relative py-4">
+                <div id="timer-display" class="text-3xl sm:text-4xl font-bold text-white tracking-widest">LOADING...</div>
                 
-                <input type="text" id="ghost-input" class="absolute inset-0 w-full h-full opacity-0 cursor-text text-transparent bg-transparent caret-transparent" autocomplete="off">
+                <input type="text" id="ghost-input" class="absolute inset-0 w-full h-full opacity-0 cursor-text bg-transparent text-transparent caret-transparent" autocomplete="off">
             </div>
             
-            <p class="text-xs text-gray-500 italic">"Menunggu waktu yang tepat..."</p>
+            <p class="text-xs text-gray-500 italic px-4">"Menunggu semesta mengizinkan..."</p>
         </div>
 
-        <div id="login-panel" class="hidden border border-green-800 p-6 bg-green-900/10 rounded fade-in">
-            <p class="mb-2 text-sm text-green-400">> BACKDOOR DETECTED.</p>
-            <p class="mb-2 text-sm">ENTER ACCESS CODE:</p>
+        <div id="login-panel" class="hidden border border-green-800 p-6 bg-green-900/10 rounded-lg fade-in">
+            <p class="mb-4 text-sm text-green-400 text-center border-b border-green-800 pb-2">> BACKDOOR DETECTED</p>
+            <p class="mb-2 text-xs text-gray-400">ENTER DECRYPTION KEY:</p>
             
-            <input type="text" id="passcode" class="w-full bg-black border border-green-600 p-3 text-center text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-green-900" placeholder="_ _ _ _ _ _" autocomplete="off">
+            <input type="text" id="passcode" class="w-full bg-black border border-green-600 p-3 text-center text-xl tracking-[0.5em] text-white focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-green-900/50 rounded" placeholder="******" autocomplete="off">
             
-            <p class="text-xs text-green-700 mt-2 italic text-center animate-pulse">> Hint: Cek Titipan (Img)</p>
+            <p class="text-[10px] text-green-600 mt-3 text-center animate-pulse">> Hint: Cek Gambar Error (Titipan)</p>
 
-            <button onclick="login()" class="w-full mt-4 bg-green-700 hover:bg-green-600 text-black font-bold py-2 rounded transition">EXECUTE</button>
-            <p id="error-msg" class="text-red-500 text-xs mt-2 text-center hidden">ACCESS DENIED</p>
+            <button onclick="login()" id="btn-login" class="w-full mt-6 bg-green-800 hover:bg-green-700 text-white font-bold py-3 rounded transition shadow-[0_0_10px_rgba(22,163,74,0.3)]">EXECUTE</button>
+            <p id="error-msg" class="text-red-500 text-xs mt-3 text-center hidden">ACCESS DENIED</p>
         </div>
 
-        <div id="game-panel" class="hidden space-y-4">
+        <div id="game-panel" class="hidden space-y-4 fade-in">
             <div id="map"></div>
-            <div class="text-center">
-                <h2 id="distance-display" class="text-3xl font-bold glitch">CALCULATING...</h2>
+            <div class="text-center p-4 border border-green-900 bg-black rounded">
+                <p class="text-gray-400 text-[10px] mb-1">DISTANCE TO TARGET</p>
+                <h2 id="distance-display" class="text-4xl font-bold text-white">0 M</h2>
             </div>
-            <div id="hint-box" class="hidden p-3 bg-yellow-900/30 border border-yellow-600 text-yellow-500 text-sm text-center">⚠ SINYAL KUAT!</div>
+            <div id="hint-box" class="hidden p-3 bg-red-900/30 border border-red-600 text-red-400 text-sm text-center font-bold animate-pulse rounded">
+                ⚠ TARGET DI SEKITAR SINI!
+            </div>
         </div>
 
-        <div id="admin-panel" class="hidden border border-red-600 p-4 bg-red-900/20 rounded space-y-6">
-            <div class="text-center"><h2 class="text-red-500 font-bold">ADMIN MODE</h2></div>
-             <button onclick="updateLocation()" class="w-full bg-red-600 text-white font-bold py-3 rounded">SET GPS</button>
+        <div id="admin-panel" class="hidden border border-red-600 p-4 bg-red-900/10 rounded space-y-6 fade-in">
+            <div class="text-center border-b border-red-800 pb-2">
+                <h2 class="text-red-500 font-bold">⚠ ADMIN OVERRIDE</h2>
+            </div>
+
+            <div>
+                <p class="text-[10px] text-gray-400 mb-1">GPS ACCURACY: <span id="acc-display">-</span>m</p>
+                <button onclick="updateLocationGPS()" class="w-full bg-red-700 text-white font-bold py-3 rounded shadow-[0_0_15px_rgba(220,38,38,0.4)]">
+                    📍 SET CURRENT LOCATION
+                </button>
+            </div>
+
+            <div class="bg-black/40 p-3 rounded border border-red-900/30">
+                <p class="text-[10px] text-gray-400 mb-2">MANUAL COORDINATES</p>
+                <div class="flex space-x-2 mb-2">
+                    <input type="number" id="man-lat" placeholder="Lat" class="w-1/2 bg-black border border-red-800 p-2 text-xs text-white">
+                    <input type="number" id="man-lng" placeholder="Lng" class="w-1/2 bg-black border border-red-800 p-2 text-xs text-white">
+                </div>
+                <button onclick="updateLocationManual()" class="w-full border border-red-600 text-red-500 text-xs py-2 rounded hover:bg-red-900/20">UPLOAD MANUAL</button>
+            </div>
+
+            <div class="bg-black/40 p-3 rounded border border-blue-900/30">
+                <p class="text-[10px] text-blue-400 mb-2">UPDATE COUNTDOWN</p>
+                <input type="datetime-local" id="time-picker" class="w-full bg-black border border-blue-800 p-2 text-xs text-white mb-2">
+                <button onclick="updateTime()" class="w-full border border-blue-600 text-blue-500 text-xs py-2 rounded hover:bg-blue-900/20">SET NEW TIME</button>
+            </div>
         </div>
 
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
     <script>
-      let map, userMarker, targetMarker, watchId;
-      let adminSecret = ""; // Simpan kode admin sementara di JS memory
-      const SECRET_KEYWORD = "sajak0802";
+        const SECRET_KEYWORD = "sajak0802"; // Mantra buat buka login
+        let adminSecret = '';
+        let map, userMarker, targetMarker, routeLine;
 
-      // 1. SAAT LOAD -> AMBIL WAKTU & JALANKAN TIMER
+        // --- 1. INITIAL LOAD (TIMER) ---
         window.onload = async () => {
+            // Ambil Waktu Rilis Public
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                if(data.release_time) {
-                    startTimer(data.release_time);
-                }
-            } catch(e) { console.log("Offline/Error"); }
+                if(data.release_time) startTimer(data.release_time);
+            } catch(e) { console.log('Offline mode'); }
 
-            // Listener untuk Ghost Input
+            // Ghost Input Logic
             const ghost = document.getElementById('ghost-input');
             ghost.addEventListener('input', (e) => {
-                // Cek apakah ketikanmu cocok dengan MANTRA
-                if (e.target.value.toLowerCase().includes(SECRET_KEYWORD)) {
-                    revealLogin();
-                    e.target.value = ""; // Reset biar gak ketahuan
-                }
+                if (e.target.value.toLowerCase().includes(SECRET_KEYWORD)) revealLogin();
             });
-            
-            // Tambahan: Tekan ENTER juga bisa trigger kalau males ngetik full
             ghost.addEventListener('keyup', (e) => {
-                if (e.key === 'Enter') {
-                    // Cek lagi value-nya atau sekadar trigger manual
-                    if(e.target.value.toLowerCase().includes(SECRET_KEYWORD)) revealLogin();
-                }
+                if (e.key === 'Enter' && e.target.value.toLowerCase().includes(SECRET_KEYWORD)) revealLogin();
             });
         };
 
         function revealLogin() {
             document.getElementById('countdown-panel').classList.add('hidden');
             document.getElementById('login-panel').classList.remove('hidden');
-            // Fokus ke input passcode asli
             setTimeout(() => document.getElementById('passcode').focus(), 100);
         }
 
-      // FUNGSI LOGIN
-      async function login() {
-        const code = document.getElementById("passcode").value;
-        const btn = document.querySelector("button");
-        const errorMsg = document.getElementById("error-msg");
-
-        btn.innerHTML = "DECRYPTING...";
-        errorMsg.classList.add("hidden");
-
-        try {
-          const res = await fetch("/api/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code }),
-          });
-          const data = await res.json();
-
-    //      if (data.role === 'countdown') {
-    //     // TAMPILKAN COUNTDOWN
-    //     document.getElementById('login-panel').classList.add('hidden');
-    //     document.getElementById('countdown-panel').classList.remove('hidden');
-    //     startTimer(data.release_time);
-        
-    // } else 
-    if (data.role === 'user') {
-        // MASUK GAME (Ida)
-        document.getElementById('login-panel').classList.add('hidden');
-        document.getElementById('game-panel').classList.remove('hidden');
-        // ... initMap seperti biasa ...
-        
-    } else if (data.role === 'admin') {
-        // MASUK ADMIN (Fendi) - Bypass Waktu
-        adminSecret = code;
-        document.getElementById('login-panel').classList.add('hidden');
-        document.getElementById('admin-panel').classList.remove('hidden');
-        
-        // Pre-fill inputan waktu biar enak ngeditnya
-        if(data.current_release) {
-            // Konversi ke format datetime-local (YYYY-MM-DDTHH:MM)
-            const dateObj = new Date(data.current_release);
-            dateObj.setMinutes(dateObj.getMinutes() - dateObj.getTimezoneOffset());
-            document.getElementById('release-picker').value = dateObj.toISOString().slice(0,16);
-        }
-        initAdminGPS();
-    }
-        } catch (err) {
-          errorMsg.classList.remove("hidden");
-          btn.innerHTML = "EXECUTE";
-        }
-      }
-
-      let routeLine;
-
-      function initMap(targetLat, targetLng) {
-        // Setup Peta Leaflet
-        map = L.map("map").setView([targetLat, targetLng], 15);
-        L.tileLayer(
-          "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-          {
-            attribution: "&copy; OpenStreetMap &copy; CARTO",
-            subdomains: "abcd",
-            maxZoom: 20,
-          },
-        ).addTo(map);
-
-        // Icon Custom
-        const redIcon = L.icon({
-          iconUrl:
-            "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-        });
-        const blueIcon = L.icon({
-          iconUrl:
-            "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-        });
-
-        // Marker Target
-        targetMarker = L.marker([targetLat, targetLng], { icon: redIcon })
-          .addTo(map)
-          .bindPopup("TARGET LOCKED");
-
-        // Tracking Posisi Kita
-        if (navigator.geolocation) {
-          watchId = navigator.geolocation.watchPosition(
-            (pos) => {
-              const lat = pos.coords.latitude;
-              const lng = pos.coords.longitude;
-
-              // Update Marker Kita
-              if (!userMarker) {
-                userMarker = L.marker([lat, lng], { icon: blueIcon })
-                  .addTo(map)
-                  .bindPopup("YOU")
-                  .openPopup();
-                map.setView([lat, lng], 18);
-              } else {
-                userMarker.setLatLng([lat, lng]);
-              }
-
-              // --- LOGIC BARU: GAMBAR GARIS PENGHUBUNG ---
-              const latlngs = [
-                [lat, lng], // Titik Kita
-                [targetLat, targetLng], // Titik Target
-              ];
-
-              if (routeLine) {
-                // Kalau garis sudah ada, update posisinya
-                routeLine.setLatLngs(latlngs);
-              } else {
-                // Kalau belum ada, bikin baru (Garis Putus-putus Hijau)
-                routeLine = L.polyline(latlngs, {
-                  color: "#3fb950", // Warna Hijau Terminal
-                  weight: 2, // Ketebalan
-                  opacity: 0.6,
-                  dashArray: "5, 10", // Efek Putus-putus (Radar Style)
-                }).addTo(map);
-              }
-              // -------------------------------------------
-
-              // Hitung Jarak
-              const dist = map.distance([lat, lng], [targetLat, targetLng]);
-              document.getElementById("distance-display").innerText =
-                Math.round(dist) + " M";
-
-              if (dist < 10) {
-                document
-                  .getElementById("distance-display")
-                  .classList.add("text-red-500");
-                document.getElementById("hint-box").classList.remove("hidden");
-              }
-            },
-            (err) => console.log(err),
-            { enableHighAccuracy: true },
-          );
-        }
-      }
-
-      // --- LOGIC ADMIN: UPDATE LOKASI ---
-      function initAdminGPS() {
-        if (navigator.geolocation) {
-          navigator.geolocation.watchPosition( 
-            (pos) => {
-              document.getElementById("acc-display").innerText = Math.round(
-                pos.coords.accuracy,
-              );
-            },
-            null,
-            { enableHighAccuracy: true },
-          );
-        }
-      }
-
-      async function updateLocation() {
-        const status = document.getElementById("admin-status");
-        status.innerText = "GETTING ACCURATE LOCATION...";
-
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            const { latitude, longitude } = pos.coords;
-
-            status.innerText = "UPLOADING TO DB...";
-
-            const res = await fetch("/api/update-loc", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                lat: latitude,
-                lng: longitude,
-                secret: adminSecret,
-              }),
-            });
-
-            const data = await res.json();
-            if (data.success) {
-              alert(
-                `✅ SUKSES! Target pindah ke lokasi kamu saat ini.\nLat: ${latitude}\nLng: ${longitude}`,
-              );
-              status.innerText = "COORDINATES UPDATED.";
-            } else {
-              alert("GAGAL UPDATE DB.");
-            }
-          },
-          (err) => alert("GPS Error"),
-          { enableHighAccuracy: true },
-        );
-      }
-
-      async function updateManual() {
-    const latInput = document.getElementById('man-lat').value;
-    const lngInput = document.getElementById('man-lng').value;
-    const status = document.getElementById('admin-status');
-
-    if(!latInput || !lngInput) {
-        status.innerText = "ERROR: EMPTY FIELDS";
-        return;
-    }
-
-    status.innerText = "UPLOADING DATA...";
-
-    try {
-        const res = await fetch('/api/update-loc', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                lat: parseFloat(latInput), 
-                lng: parseFloat(lngInput), 
-                secret: adminSecret 
-            })
-        });
-        
-        const data = await res.json();
-        if(data.success) {
-            alert(`✅ MANUAL UPDATE SUKSES!\nTarget: ${latInput}, ${lngInput}`);
-            status.innerText = "COORD SAVED.";
-        } else {
-            status.innerText = "SERVER ERROR.";
-        }
-    } catch (err) {
-        status.innerText = "CONNECTION FAILED.";
-    }
-}
-
-// LOGIC HITUNG MUNDUR
-let countdownInterval;
-        function startTimer(endTimeISO) {
-            const endTime = new Date(endTimeISO).getTime();
-            countdownInterval = setInterval(() => {
+        // --- 2. TIMER LOGIC ---
+        function startTimer(isoTime) {
+            const endTime = new Date(isoTime).getTime();
+            setInterval(() => {
                 const now = new Date().getTime();
-                const distance = endTime - now;
+                const dist = endTime - now;
 
-                if (distance < 0) {
-                    clearInterval(countdownInterval);
-                    document.getElementById('timer-display').innerText = "OPEN";
-                    // Kalau waktu habis, otomatis buka form login buat Ida
-                    revealLogin(); 
+                if (dist < 0) {
+                    document.getElementById('timer-display').innerText = "OPEN ACCESS";
+                    document.getElementById('timer-display').classList.add('text-green-500');
                     return;
                 }
-                
-                // Rumus Waktu
-                const d = Math.floor(distance / (1000 * 60 * 60 * 24));
-                const h = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const m = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                const s = Math.floor((distance % (1000 * 60)) / 1000);
+
+                const d = Math.floor(dist / (1000 * 60 * 60 * 24));
+                const h = Math.floor((dist % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const m = Math.floor((dist % (1000 * 60 * 60)) / (1000 * 60));
+                const s = Math.floor((dist % (1000 * 60)) / 1000);
                 document.getElementById('timer-display').innerText = `${d}d ${h}h ${m}m ${s}s`;
             }, 1000);
         }
 
-// LOGIC UPDATE WAKTU (ADMIN)
-async function updateTime() {
-    const newTime = document.getElementById('release-picker').value;
-    if(!newTime) return alert("Pilih jam dulu bos");
+        // --- 3. LOGIN LOGIC ---
+        async function login() {
+            const code = document.getElementById('passcode').value;
+            const btn = document.getElementById('btn-login');
+            const errMsg = document.getElementById('error-msg');
+            
+            btn.innerText = "DECRYPTING...";
+            errMsg.classList.add('hidden');
 
-    const res = await fetch('/api/update-time', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_time: newTime, secret: adminSecret })
-    });
-    alert("Timer Updated!");
-}
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ code })
+                });
+                const data = await res.json();
+
+                if (data.role === 'user') {
+                    // Masuk Game
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('game-panel').classList.remove('hidden');
+                    setTimeout(() => {
+                        initMap(data.target.lat, data.target.lng);
+                        if(map) map.invalidateSize();
+                    }, 500);
+                } 
+                else if (data.role === 'admin') {
+                    // Masuk Admin
+                    adminSecret = code;
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('admin-panel').classList.remove('hidden');
+                    
+                    // Pre-fill Admin Data
+                    if(data.current_time) {
+                        const d = new Date(data.current_time);
+                        d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+                        document.getElementById('time-picker').value = d.toISOString().slice(0,16);
+                    }
+                    if(data.current_target) {
+                        document.getElementById('man-lat').value = data.current_target.lat;
+                        document.getElementById('man-lng').value = data.current_target.lng;
+                    }
+                    initAdminGPS();
+                } else if (data.role === 'countdown') {
+                    // Masuk Countdown
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('countdown-panel').classList.remove('hidden');
+                    startTimer(data.release_time);
+                } 
+                else {
+                    throw new Error(data.message || 'Access Denied');
+                }
+            } catch (err) {
+                errMsg.innerText = err.message || "WRONG PASSCODE";
+                errMsg.classList.remove('hidden');
+                btn.innerText = "EXECUTE";
+            }
+        }
+
+        // --- 4. MAP LOGIC (USER) ---
+        function initMap(targetLat, targetLng) {
+            map = L.map('map').setView([targetLat, targetLng], 15);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 20
+            }).addTo(map);
+
+            const redIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+            const blueIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+
+            targetMarker = L.marker([targetLat, targetLng], {icon: redIcon}).addTo(map).bindPopup("TARGET LOCKED");
+
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition((pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    
+                    if (!userMarker) {
+                        userMarker = L.marker([lat, lng], {icon: blueIcon}).addTo(map).bindPopup("YOU").openPopup();
+                        map.setView([lat, lng], 18);
+                    } else {
+                        userMarker.setLatLng([lat, lng]);
+                    }
+
+                    // Garis Penghubung
+                    const route = [[lat, lng], [targetLat, targetLng]];
+                    if(routeLine) routeLine.setLatLngs(route);
+                    else routeLine = L.polyline(route, { color: '#3fb950', dashArray: '5, 10', weight: 2 }).addTo(map);
+
+                    // Jarak
+                    const dist = map.distance([lat, lng], [targetLat, targetLng]);
+                    document.getElementById('distance-display').innerText = Math.round(dist) + " M";
+                    
+                    if(dist < 10) {
+                        document.getElementById('distance-display').classList.add('text-red-500');
+                        document.getElementById('hint-box').classList.remove('hidden');
+                    }
+                }, null, { enableHighAccuracy: true });
+            }
+        }
+
+        // --- 5. ADMIN ACTIONS ---
+        function initAdminGPS() {
+            if(navigator.geolocation) {
+                navigator.geolocation.watchPosition(p => {
+                    document.getElementById('acc-display').innerText = Math.round(p.coords.accuracy);
+                }, null, {enableHighAccuracy: true});
+            }
+        }
+
+        async function updateLocationGPS() {
+            if(!confirm("Set lokasi HP ini sebagai target?")) return;
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                await sendUpdateLoc(pos.coords.latitude, pos.coords.longitude);
+            }, () => alert("GPS Error"), {enableHighAccuracy: true});
+        }
+
+        async function updateLocationManual() {
+            const lat = document.getElementById('man-lat').value;
+            const lng = document.getElementById('man-lng').value;
+            if(!lat || !lng) return alert("Isi koordinat dulu");
+            await sendUpdateLoc(lat, lng);
+        }
+
+        async function sendUpdateLoc(lat, lng) {
+            const res = await fetch('/api/update-loc', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ lat, lng, secret: adminSecret })
+            });
+            if(res.ok) alert("✅ Target Updated!");
+        }
+
+        async function updateTime() {
+            const time = document.getElementById('time-picker').value;
+            if(!time) return alert("Pilih waktu dulu");
+            const res = await fetch('/api/update-time', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ new_time: time, secret: adminSecret })
+            });
+            if(res.ok) alert("✅ Timer Updated!");
+        }
     </script>
-  </body>
+</body>
 </html>
