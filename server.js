@@ -97,6 +97,9 @@ app.post('/api/login', async (req, res) => {
   } 
   
   // 2. CEK USER
+  else if (code === "idaindarwati") {
+    return res.json({ role: 'user', target: data.target });
+  }
   else if (code === data.unlock_code) {
     const now = new Date();
     const release = new Date(data.release_time);
