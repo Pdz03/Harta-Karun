@@ -40,10 +40,12 @@ const QuestSchema = new mongoose.Schema({
   ida_opinions: { type: Map, of: String, default: {} }, // Pendapat per lokasi
   ida_shortlist: { type: [String], default: [] }, // Checkbox Calon
   ida_final: { type: String, default: '' }, // Radio Pilih Lokasi
+  ida_custom_dest: { type: String, default: '' },
   dest_submitted: { type: Boolean, default: false }, // Kunci Form Tujuan
   foods: { type: [String], default: ['', '', ''] },
   photo_url: { type: String, default: '' },
-  quest_submitted: { type: Boolean, default: false } // Kunci Form Quest
+  quest_submitted: { type: Boolean, default: false }, // Kunci Form Quest
+  drive_link: { type: String, default: '' },
 });
 const Quest = mongoose.model('Quest', QuestSchema);
 
@@ -108,24 +110,27 @@ app.post('/api/quest/admin/unlock', async (req, res) => {
 
 // Ida: Submit Pilihan Tujuan & Pendapat
 app.post('/api/quest/submit-dest', async (req, res) => {
-  const { opinions, shortlist, finalChoice } = req.body;
+  const { opinions, shortlist, finalChoice, customDest } = req.body;
   const q = await Quest.findOne({ session_name: 'magelang_2026' });
   
   q.ida_opinions = opinions;
   q.ida_shortlist = shortlist;
   q.ida_final = finalChoice;
+  q.ida_custom_dest = customDest; // <-- Simpan ke DB
   q.dest_submitted = true;
   await q.save();
   res.json({success: true});
 });
 
 // Ida: Submit Quest Makanan & Foto
+// --- UPDATE API SUBMIT TASK ---
 app.post('/api/quest/submit-task', async (req, res) => {
-  const { foods, photo_url } = req.body;
+  const { foods, photo_url, drive_link } = req.body; // <-- Tangkap drive_link
   const q = await Quest.findOne({ session_name: 'magelang_2026' });
   
   q.foods = foods;
   q.photo_url = photo_url;
+  q.drive_link = drive_link; // <-- Simpan ke DB
   q.quest_submitted = true;
   await q.save();
   res.json({success: true});
