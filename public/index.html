@@ -140,10 +140,12 @@
                 <button onclick="updateTime()" class="w-full border border-blue-600 text-blue-500 text-xs py-2">SET COUNTDOWN</button>
             </div>
 
-            <div class="bg-black/40 p-3 border border-yellow-900/30">
+<div class="bg-black/40 p-3 border border-yellow-900/30">
                 <p class="text-xs text-yellow-400 font-bold mb-2">TAMBAH DESTINASI QUEST</p>
                 <input type="text" id="admin-dest-name" placeholder="Nama Tempat (ex: TKL Ecopark)" class="w-full bg-gray-900 border border-gray-700 p-2 text-xs mb-2">
                 <input type="text" id="admin-dest-link" placeholder="Link TikTok Review" class="w-full bg-gray-900 border border-gray-700 p-2 text-xs mb-2">
+                <textarea id="admin-dest-desc" placeholder="Deskripsi Singkat (ex: Tempatnya sejuk, banyak pohon...)" class="w-full bg-gray-900 border border-gray-700 p-2 text-xs mb-2 h-16"></textarea>
+                
                 <button onclick="adminAddDest()" class="w-full bg-yellow-700 text-white text-xs py-2">TAMBAHKAN KE LIST IDA</button>
             </div>
 
@@ -255,12 +257,11 @@
                 return;
             }
 
-            questData.destinations.forEach(d => {
+questData.destinations.forEach(d => {
                 // Restore saved input
                 const savedOp = localStorage.getItem(`op_${d.id}`) || questData.ida_opinions[d.id] || '';
                 const isShort = questData.ida_shortlist.includes(d.id);
                 const isFinal = questData.ida_final === d.id;
-
                 const disabledAttr = questData.dest_submitted ? 'disabled' : '';
 
                 wrap.innerHTML += `
@@ -269,6 +270,10 @@
                         <h3 class="font-bold text-sm text-yellow-500">${d.name}</h3>
                         <a href="${d.link}" target="_blank" class="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-1 rounded">Cek TikTok ↗</a>
                     </div>
+                    
+                    <p class="text-[10px] text-gray-400 mb-3 italic leading-relaxed border-l-2 border-yellow-700 pl-2">
+                        ${d.description || 'Tidak ada deskripsi.'}
+                    </p>
                     
                     <textarea id="op_${d.id}" oninput="saveOpSession('${d.id}')" ${disabledAttr} class="w-full bg-black border border-gray-800 p-2 text-xs text-gray-300 rounded mb-3 h-16" placeholder="Ketik pendapatmu soal tempat ini...">${savedOp}</textarea>
                     
@@ -380,15 +385,17 @@
         async function adminAddDest() {
             const name = document.getElementById('admin-dest-name').value;
             const link = document.getElementById('admin-dest-link').value;
+            const description = document.getElementById('admin-dest-desc').value; // Ambil deskripsi
             if(!name) return alert("Isi nama destinasi");
             
             await fetch('/api/quest/admin/add-dest', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, link, secret: adminSecret })
+                body: JSON.stringify({ name, link, description, secret: adminSecret }) // Kirim deskripsi
             });
             alert("Destinasi Ditambahkan!");
             document.getElementById('admin-dest-name').value = '';
             document.getElementById('admin-dest-link').value = '';
+            document.getElementById('admin-dest-desc').value = ''; // Kosongkan setelah sukses
         }
 
         async function loadAdminQuestData() {

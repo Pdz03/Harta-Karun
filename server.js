@@ -36,7 +36,7 @@ const Treasure = mongoose.model('Treasure', TreasureSchema);
 // B. Schema Quest H-1 (BARU)
 const QuestSchema = new mongoose.Schema({
   session_name: { type: String, default: 'magelang_2026' },
-  destinations: [{ id: String, name: String, link: String }], // Data Admin
+  destinations: [{ id: String, name: String, link: String, description: String }], // <-- Tambah description di sini
   ida_opinions: { type: Map, of: String, default: {} }, // Pendapat per lokasi
   ida_shortlist: { type: [String], default: [] }, // Checkbox Calon
   ida_final: { type: String, default: '' }, // Radio Pilih Lokasi
@@ -70,12 +70,13 @@ app.get('/api/quest/data', async (req, res) => {
 
 // Admin: Tambah Destinasi
 app.post('/api/quest/admin/add-dest', async (req, res) => {
-  const { name, link, secret } = req.body;
+  const { name, link, description, secret } = req.body; // <-- Tangkap description
   const t = await Treasure.findOne({ session_name: 'magelang_2026' });
   if(secret !== t.admin_code) return res.status(403).json({error: 'Forbidden'});
 
   const q = await Quest.findOne({ session_name: 'magelang_2026' });
-  q.destinations.push({ id: 'dest_' + Date.now(), name, link });
+  // Masukkan description ke array
+  q.destinations.push({ id: 'dest_' + Date.now(), name, link, description }); 
   await q.save();
   res.json({success: true});
 });
