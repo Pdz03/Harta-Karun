@@ -69,16 +69,28 @@ app.get('/api/quest/data', async (req, res) => {
 });
 
 // Admin: Tambah Destinasi
+// Admin: Tambah Destinasi
 app.post('/api/quest/admin/add-dest', async (req, res) => {
-  const { name, link, description, secret } = req.body; // <-- Tangkap description
-  const t = await Treasure.findOne({ session_name: 'magelang_2026' });
-  if(secret !== t.admin_code) return res.status(403).json({error: 'Forbidden'});
+  try {
+      const { name, link, description, secret } = req.body;
+      const t = await Treasure.findOne({ session_name: 'magelang_2026' });
+      if(!t || secret !== t.admin_code) return res.status(403).json({error: 'Forbidden'});
 
-  const q = await Quest.findOne({ session_name: 'magelang_2026' });
-  // Masukkan description ke array
-  q.destinations.push({ id: 'dest_' + Date.now(), name, link, description }); 
-  await q.save();
-  res.json({success: true});
+      let q = await Quest.findOne({ session_name: 'magelang_2026' });
+      
+      // FIX BUG: Jika data Quest belum ada di DB, otomatis buat baru!
+      if (!q) {
+          q = new Quest({ session_name: 'magelang_2026' });
+      }
+
+      // Masukkan destinasi baru
+      q.destinations.push({ id: 'dest_' + Date.now(), name, link, description }); 
+      await q.save();
+      
+      res.json({success: true});
+  } catch (err) {
+      res.status(500).json({error: err.message});
+  }
 });
 
 // Admin: Buka Gembok Form Ida

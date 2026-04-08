@@ -385,17 +385,29 @@ questData.destinations.forEach(d => {
         async function adminAddDest() {
             const name = document.getElementById('admin-dest-name').value;
             const link = document.getElementById('admin-dest-link').value;
-            const description = document.getElementById('admin-dest-desc').value; // Ambil deskripsi
+            const description = document.getElementById('admin-dest-desc').value;
             if(!name) return alert("Isi nama destinasi");
             
-            await fetch('/api/quest/admin/add-dest', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, link, description, secret: adminSecret }) // Kirim deskripsi
-            });
-            alert("Destinasi Ditambahkan!");
-            document.getElementById('admin-dest-name').value = '';
-            document.getElementById('admin-dest-link').value = '';
-            document.getElementById('admin-dest-desc').value = ''; // Kosongkan setelah sukses
+            try {
+                const res = await fetch('/api/quest/admin/add-dest', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name, link, description, secret: adminSecret })
+                });
+
+                if (res.ok) {
+                    alert("✅ Destinasi Berhasil Disimpan ke Database!");
+                    document.getElementById('admin-dest-name').value = '';
+                    document.getElementById('admin-dest-link').value = '';
+                    document.getElementById('admin-dest-desc').value = '';
+                    
+                    // Otomatis refresh list di admin
+                    loadAdminQuestData(); 
+                } else {
+                    alert("❌ Gagal menyimpan destinasi.");
+                }
+            } catch (e) {
+                alert("❌ Error koneksi!");
+            }
         }
 
         async function loadAdminQuestData() {
@@ -403,25 +415,59 @@ questData.destinations.forEach(d => {
             const data = await res.json();
             const div = document.getElementById('admin-quest-result');
             
-            let html = `<b>STATUS LOKASI:</b> ${data.dest_submitted ? '<span class="text-green-500">TERKUNCI</span>' : '<span class="text-yellow-500">PROSES ISI</span>'}<br>`;
+            if (!data || !data.destinations) {
+                div.innerHTML = "Belum ada data Quest.";
+                return;
+            }
+
+            let html = `<b>STATUS LOKASI:</b> ${data.dest_submitted ? '<span class="text-green-500">TERKUNCI (Ida sudah submit)</span>' : '<span class="text-yellow-500">PROSES ISI</span>'}<br>`;
             
             let finalName = "-";
             if(data.ida_final) {
                 const fd = data.destinations.find(x => x.id === data.ida_final);
-                if(fd) finalName = `<span class="text-red-400">${fd.name}</span>`;
+                if(fd) finalName = `<span class="text-red-400 font-bold tracking-widest">${fd.name} 🎯</span>`;
             }
             html += `<b>FINAL PILIHAN:</b> ${finalName}<br><br>`;
             
-            html += `<b>DAFTAR PENDAPAT:</b><br>`;
-            data.destinations.forEach(d => {
-                const op = data.ida_opinions[d.id] || '-';
-                const isShort = data.ida_shortlist.includes(d.id) ? '⭐' : '';
-                html += `- ${d.name} ${isShort} : <i>"${op}"</i><br>`;
-            });
+            // --- HEADER LIST DESTINASI ---
+            html += `<div class="border-t border-gray-700 pt-3 mt-3">`;
+            html += `<b class="text-yellow-500">DAFTAR DESTINASI & PENDAPAT IDA:</b><br>`;
+            html += `<div class="space-y-3 mt-2">`;
 
-            html += `<br><br><b>STATUS MEMORI:</b> ${data.quest_submitted ? '<span class="text-green-500">TERKUNCI</span>' : '<span class="text-yellow-500">PROSES ISI</span>'}<br>`;
-            html += `Makanan: ${data.foods.join(', ')}<br>`;
-            html += `Foto URL: ${data.photo_url ? `<a href="${data.photo_url}" target="_blank" class="text-blue-400 underline">Lihat Foto</a>` : '-'}`;
+            if (data.destinations.length === 0) {
+                html += `<p class="text-xs text-gray-500">Belum ada destinasi ditambahkan.</p>`;
+            } else {
+                // RENDER KOTAK PER DESTINASI
+                data.destinations.forEach(d => {
+                    const op = data.ida_opinions[d.id] || '<span class="text-gray-600 italic">Belum diisi...</span>';
+                    const isShort = data.ida_shortlist.includes(d.id) ? '⭐ (Masuk Calon)' : '';
+                    const isFinal = data.ida_final === d.id ? '🎯 (PILIHAN FINAL)' : '';
+
+                    html += `
+                    <div class="bg-black/60 p-3 border border-gray-700 rounded relative">
+                        <div class="flex justify-between items-start border-b border-gray-800 pb-2 mb-2">
+                            <div>
+                                <h4 class="font-bold text-blue-400 text-sm">${d.name}</h4>
+                                <p class="text-[9px] text-gray-500 mt-1 leading-tight">${d.description || 'Tidak ada deskripsi'}</p>
+                            </div>
+                            <span class="text-[10px] text-yellow-400 font-bold text-right ml-2">${isFinal || isShort}</span>
+                        </div>
+                        <div class="bg-gray-800/80 p-2 rounded border-l-2 border-yellow-600">
+                            <p class="text-[9px] text-gray-400 mb-1">Komentar Ida:</p>
+                            <p class="text-[11px] text-white">"${op}"</p>
+                        </div>
+                    </div>`;
+                });
+            }
+
+            html += `</div></div>`; // Tutup area list
+            
+            // --- AREA TUGAS MEMORI ---
+            html += `<div class="border-t border-gray-700 pt-3 mt-4">`;
+            html += `<b>STATUS MEMORI:</b> ${data.quest_submitted ? '<span class="text-green-500">TERKUNCI</span>' : '<span class="text-yellow-500">PROSES ISI</span>'}<br>`;
+            html += `<p class="mt-1"><b>Makanan:</b><br> <span class="text-gray-300">- ${data.foods ? data.foods.join('<br>- ') : '-'}</span></p>`;
+            html += `<p class="mt-2"><b>Foto:</b> ${data.photo_url ? `<a href="${data.photo_url}" target="_blank" class="text-blue-400 underline">Klik untuk Lihat Foto ↗</a>` : '-'}</p>`;
+            html += `</div>`;
 
             div.innerHTML = html;
         }
